@@ -53,15 +53,27 @@ All conditions auto-deny the escape/integrity set (`Edit`/`Write`/`NotebookEdit`
 > degrades gracefully without it. Run results live under gitignored
 > `bench/results/` (never committed).
 
-## Smoke result — superseded (MCP surface)
+## Full-run result — 2026-07-29 (CLI surface)
 
-The smoke numbers previously shown here (run `20260721T225610/`, D/A/C/B ≈
-0.47/0.32/0.31/0.48; κ −0.333 → 1.000 after the Plan-3 fix) were produced on the
-**legacy MCP surface** and are **superseded** by Plan 4. They are archived under
-`bench/results/_superseded-mcp/` for local reference only. A CLI-surface smoke
-is the next step; the methodology demonstrated there (capped→0 short-circuit,
-blinded-transcript κ alignment, 0.5 binarization) carries over unchanged. See
-`PREREGISTRATION.md` Amendment 2026-07-22 (Plan 4).
+First complete CLI run: 1,200 cells (50 Q × 4 conditions × 2 models × 3 seeds),
+graded by the final grader set. Mean correctness by condition (capped = 0):
+
+| Cond | Mean | cap rate |
+|---|---|---|
+| A lexical | **0.66** | 42 |
+| B vector-only | 0.55 | 83 |
+| C raw agent | 0.61 | 52 |
+| D jrag full | 0.65 | 41 |
+
+**A ≈ D** — jrag ties an intelligent grep baseline; B (vector-only) is clearly
+worst. Verdicts: C1 partial, C2 partial, **C3 not supported** (Feign clients are
+greppable), C4/C5 supported, C6 not supported. jrag's real edge is narrow
+(finishes hard transitive blast-radius questions; caps 4× vs 12–22× for
+baselines); its real weakness is over-exploration (caps on trace/semantic).
+**Judge-driven verdicts are provisional pending the human κ gate (κ = N/A).**
+Full analysis: [`FULL-RUN-FINDINGS.md`](./FULL-RUN-FINDINGS.md). Raw run
+artifacts are gitignored under `bench/results/20260728T173105/` (local only).
+The legacy MCP-surface smoke is archived under `bench/results/_superseded-mcp/`.
 
 ## Layout
 

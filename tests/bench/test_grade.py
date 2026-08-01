@@ -86,7 +86,8 @@ def test_grade_set_match_perfect():
 def test_grade_set_match_partial():
     """truth has 12, answer extracts 8 correct + 0 spurious.
 
-    recall == 8/12, precision == 1.0, f1 == harmonic mean.
+    recall == 8/12, precision == 1.0, f1 == harmonic mean. correctness ==
+    recall (recall-weighted: finding the expected set is the signal).
     """
     truth = {
         "kind": "symbol_set",
@@ -104,7 +105,45 @@ def test_grade_set_match_partial():
     assert g.detail["precision"] == pytest.approx(expected_precision)
     assert g.detail["recall"] == pytest.approx(expected_recall)
     assert g.detail["f1"] == pytest.approx(expected_f1)
-    assert g.correctness == pytest.approx(expected_f1)
+    assert g.correctness == pytest.approx(5 * expected_precision * expected_recall / (4 * expected_precision + expected_recall))
+
+
+def test_grade_set_match_recall_weighting_reduces_prose_penalty():
+    """F2 (recall-weighted) lessens the penalty for explanatory prose vs F1.
+
+    Reproduces bc-impl-02_D: the answer found both expected symbols but
+    explained each (prose mentions of InternalEvent/Client/Spring...). Under F1
+    the prose tanked precision and scored ~0.27; under F2 (recall-weighted) it
+    scores higher, recall still 1.0.
+    """
+    truth = {
+        "kind": "symbol_set",
+        "fqns": ["com.example.EventTypeFilter", "com.example.ClientSegmentFilter"],
+        "ids": [],
+    }
+    answer = (
+        "EventTypeFilter filters InternalEvent objects; ClientSegmentFilter "
+        "filters Client objects. Both are Spring Component classes."
+    )
+    g = grade_set_match(answer, truth)
+    assert g.detail["recall"] == 1.0
+    assert g.detail["precision"] < 0.5
+    assert g.correctness == g.detail["f2"]
+    assert g.correctness > g.detail["f1"]  # recall-weighting reduces the prose penalty
+
+
+def test_grade_set_match_spray_stays_low_under_f2():
+    """Spraying many names (incidently hitting a small expected set) stays low
+    under F2 — recall-weighting must not reward guessing. Reproduces
+    bc-blast-02_C: truth_n=1, agent listed ~24 names including the 1 expected.
+    """
+    truth = {"kind": "symbol_set", "fqns": ["com.example.OnlyOne"], "ids": []}
+    others = " ".join(f"Class{i}" for i in range(23))  # 23 spurious + OnlyOne
+    answer = f"OnlyOne {others}"
+    g = grade_set_match(answer, truth)
+    assert g.detail["recall"] == 1.0
+    assert g.detail["precision"] < 0.1
+    assert g.correctness < 0.3  # spray is not rewarded under F2
 
 
 def test_grade_set_match_bc_impl_01():
@@ -402,11 +441,11 @@ def test_judge_answer_returns_grade():
 
 
 def test_judge_answer_raises_on_unparseable(monkeypatch):
-    """judge_answer raises GradeError when result.result is not valid JSON."""
+    """judge_answer raises GradeError when the rubric stdout is not valid JSON."""
 
     class _FakeCompleted:
-        # An outer --output-format json envelope whose `result` is not JSON.
-        stdout = '{"result": "this is not { valid json }"}'
+        # --output-format text: raw rubric stdout that is not valid JSON.
+        stdout = "this is not { valid json }"
         returncode = 0
 
     def _fake_run(argv, *args, **kwargs):
@@ -418,12 +457,13 @@ def test_judge_answer_raises_on_unparseable(monkeypatch):
 
 
 def test_judge_answer_parses_fenced_json(monkeypatch):
-    """judge_answer strips ```json fences before parsing result."""
+    """judge_answer strips ```json fences before parsing the raw rubric."""
 
     class _FakeCompleted:
-        # An outer --output-format json envelope whose `result` is a fenced JSON string.
-        # After JSON parsing, \n becomes actual newline characters.
-        stdout = '{"result": "```json\\n{\\"correctness\\": 0.8, \\"rationale\\": \\"factually correct.\\"}\\n```"}'
+        # --output-format text: raw rubric stdout wrapped in ```json fences.
+        stdout = (
+            '```json\n{"correctness": 0.8, "rationale": "factually correct."}\n```'
+        )
         returncode = 0
 
     def _fake_run(argv, *args, **kwargs):
@@ -436,6 +476,30 @@ def test_judge_answer_parses_fenced_json(monkeypatch):
     assert g.judge_model == "glm-5.2"
     assert g.detail["rationale"] == "factually correct."
     assert len(g.detail["rationale"]) > 0  # Non-empty
+
+
+def test_judge_answer_retries_once_then_succeeds(monkeypatch):
+    """judge_answer retries once: a first malformed emission, then a clean one."""
+
+    calls = {"n": 0}
+
+    class _Ok:
+        stdout = '{"correctness": 0.7, "rationale": "fine"}'
+        returncode = 0
+
+    def _fake_run(argv, *args, **kwargs):
+        calls["n"] += 1
+
+        class _Bad:
+            stdout = "not json on the first try"
+            returncode = 0
+
+        return _Bad() if calls["n"] == 1 else _Ok()
+
+    monkeypatch.setattr("bench.grade.subprocess.run", _fake_run)
+    g = judge_answer("blinded", "q", {"kind": "semantic", "answer": "a"})
+    assert g.correctness == 0.7
+    assert calls["n"] == 2  # one failure, one success
 
 
 def test_judge_answer_timeout_raises_gradeerror(monkeypatch):

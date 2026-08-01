@@ -204,9 +204,15 @@ def grade_set_match(answer_text: str, expected: dict) -> Grade:
     precision = tp / |extracted|   (0 if extracted is empty)
     recall    = tp / |truth|       (0 if truth is empty)
     f1        = 2·precision·recall / (precision + recall)   (0 if denom is 0)
-    correctness = f1
+    f2        = 5·precision·recall / (4·precision + recall) (0 if denom is 0)
+    correctness = f2
     method      = "set_match"
     judge_model = None
+
+    ``correctness`` is **F2** (recall-weighted F-measure, beta=2) — see the body
+    comment for why neither F1 (under-credits explanatory answers) nor pure
+    recall (rewards spraying) is right. ``precision`` / ``recall`` / ``f1`` are
+    retained in ``detail`` for the stricter / lenient views.
     """
     extracted = extract_simple_names(answer_text)
     truth = expected_simple_names(expected)
@@ -219,16 +225,29 @@ def grade_set_match(answer_text: str, expected: dict) -> Grade:
     recall = tp / expected_n if expected_n else 0.0
     denom = precision + recall
     f1 = (2 * precision * recall / denom) if denom else 0.0
+    # F2: recall-weighted F-measure (beta=2 weights recall 4x over precision).
+    # ``correctness`` is F2, not F1 or pure recall. ``extract_simple_names`` is
+    # format-agnostic and over-extracts (every uppercase token, including
+    # related types in explanatory prose), so under F1 a *correct* answer that
+    # found every expected symbol but explained each one scored ~0.27
+    # (``bc-impl-02_D``). Pure recall fixes that but is uninformative: an answer
+    # that sprays many names and incidentally hits the small expected set
+    # (``bc-blast-02_C``: truth_n=1, predicted_n=24) scored 1.0. F2 credits
+    # finding the expected set (recall-heavy) while still penalizing spraying
+    # (low precision) — verbose-correct rises (0.27→~0.47), spray stays low.
+    f2_denom = 4 * precision + recall
+    f2 = (5 * precision * recall / f2_denom) if f2_denom else 0.0
 
     detail = {
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "f2": f2,
         "predicted_n": predicted_n,
         "expected_n": expected_n,
     }
     return Grade(
-        correctness=f1,
+        correctness=f2,
         method="set_match",
         detail=detail,
         judge_model=None,
@@ -526,10 +545,13 @@ def judge_answer(
     tools, no MCP, no ``--verbose`` (plain JSON, not stream-json), no turn
     cap — it only emits the rubric JSON.
 
-    The outer ``--output-format json`` envelope is ``{"result": "..."}``
-    where ``result`` is the judge's raw output as a string. That string is
-    itself the rubric JSON ``{"correctness": ..., "rationale": ...}``, so
-    the parse is ``json.loads(json.loads(stdout)["result"])``.
+    Invoked with ``--output-format text``; stdout is the judge's rubric JSON
+    (``{"correctness": ..., "rationale": ...}``) directly, parsed after
+    stripping optional triple-backtick JSON code fences. (Previously
+    ``--output-format json`` nested the rubric in a ``{"result": ...}`` envelope
+    whose escaping was unreliable when the rationale contained quotes — a
+    deterministic-per-content failure; text output removes the nesting.) A
+    single retry (``_JUDGE_MAX_ATTEMPTS``) absorbs residual stochastic flakiness.
 
     Args:
         blinded_transcript: Tool-name-scrubbed transcript (``blind_transcript``
@@ -556,37 +578,50 @@ def judge_answer(
         f"Answer transcript (tool names blinded to [tool]):\n{blinded_transcript}"
     )
 
-    try:
-        proc = subprocess.run(
-            [
-                judge_bin,
-                "-p", prompt,
-                "--model", judge_model,
-                "--output-format", "json",
-                "--permission-mode", "bypassPermissions",
-            ],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired as exc:
-        # Per-cell wall-clock bound on the judge. Without this a hung judge
-        # process blocks the grader indefinitely. Caught before the broader
-        # SubprocessError handler below so the message names the timeout.
-        raise GradeError("judge timed out (>120s)") from exc
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise GradeError(f"judge subprocess failed: {exc!r}") from exc
+    # The judge is invoked with ``--output-format text`` and returns its rubric
+    # JSON as raw stdout (parsed directly below). The prior ``--output-format
+    # json`` wrapped the rubric in a ``{"result": "<escaped rubric>"}`` envelope
+    # whose nested-JSON escaping was unreliable: when the rationale itself
+    # contained quotes (common), the envelope was double-escaped and the outer
+    # parse failed — a deterministic-per-content failure observed on the
+    # 2026-07-28 pilot. Text output sidesteps the nesting entirely.
+    #
+    # ``_JUDGE_MAX_ATTEMPTS`` adds one retry to absorb residual stochastic
+    # flakiness (timeout / a one-off malformed emission); the last attempt's
+    # error is raised if every attempt fails.
+    last_error: GradeError | None = None
+    for _ in range(_JUDGE_MAX_ATTEMPTS):
+        try:
+            proc = subprocess.run(
+                [
+                    judge_bin,
+                    "-p", prompt,
+                    "--model", judge_model,
+                    "--output-format", "text",
+                    "--permission-mode", "bypassPermissions",
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            # Per-cell wall-clock bound. Without it a hung judge blocks the
+            # grader indefinitely.
+            last_error = GradeError("judge timed out (>120s)")
+            continue
+        except (OSError, subprocess.SubprocessError) as exc:
+            last_error = GradeError(f"judge subprocess failed: {exc!r}")
+            continue
 
-    if proc.returncode != 0:
-        raise GradeError(
-            f"judge {judge_bin} exited {proc.returncode}: "
-            f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-        )
+        if proc.returncode != 0:
+            last_error = GradeError(
+                f"judge {judge_bin} exited {proc.returncode}: "
+                f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+            )
+            continue
 
-    try:
-        envelope = json.loads(proc.stdout)
-        inner_text = envelope["result"].strip()
+        inner_text = proc.stdout.strip()
         if inner_text.startswith("```"):
             # Drop first line (```json or ```) and trailing ```
             lines = inner_text.splitlines()
@@ -595,30 +630,31 @@ def judge_answer(
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             inner_text = "\n".join(lines).strip()
-        inner = json.loads(inner_text)
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise GradeError(
-            f"could not parse judge result: {exc!r}; stdout={proc.stdout!r}"
-        ) from exc
-
-    try:
-        correctness = float(inner["correctness"])
-        rationale = inner.get("rationale")
-        if not isinstance(rationale, str) or not rationale:
-            raise GradeError(
-                f"judge result missing/invalid rationale: must be non-empty str; got {type(rationale).__name__}"
+        try:
+            inner = json.loads(inner_text)
+            correctness = float(inner["correctness"])
+            rationale = inner.get("rationale")
+            if not isinstance(rationale, str) or not rationale:
+                last_error = GradeError(
+                    f"judge result missing/invalid rationale: must be non-empty "
+                    f"str; got {type(rationale).__name__}; stdout={proc.stdout!r}"
+                )
+                continue
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            last_error = GradeError(
+                f"could not parse judge result: {exc!r}; stdout={proc.stdout!r}"
             )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise GradeError(
-            f"judge result missing/malformed fields: {exc!r}; inner={inner!r}"
-        ) from exc
+            continue
 
-    return Grade(
-        correctness=correctness,
-        method="llm_judge",
-        detail={"rationale": rationale},
-        judge_model=judge_model,
-    )
+        return Grade(
+            correctness=correctness,
+            method="llm_judge",
+            detail={"rationale": rationale},
+            judge_model=judge_model,
+        )
+
+    assert last_error is not None  # loop exits without returning only on failure
+    raise last_error
 
 
 # --- Task 14: grade_cell dispatch + cohen_kappa + grade_run + CLI ---
@@ -777,6 +813,11 @@ def cohen_kappa(judge_labels: list, human_labels: list) -> float:
 # "correct"; the prior ``== 1.0`` made any sub-perfect score "incorrect", which
 # manufactured κ disagreement between a lenient judge and the human gate.
 JUDGE_CORRECT_THRESHOLD = 0.5
+
+# Judge call retry budget. The judge occasionally emits unparseable output
+# (stochastic), so a single retry recovers transient failures; the last
+# attempt's error is raised if every attempt fails.
+_JUDGE_MAX_ATTEMPTS = 2
 
 
 def _grade_to_judge_label(grade: Grade) -> str:

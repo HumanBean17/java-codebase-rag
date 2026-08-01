@@ -62,3 +62,6 @@ tmp/
 
 # uv lock file (should not be committed)
 uv.lock
+
+# Stray agent-host artifacts inside test-fixture corpora (e.g. tests/<corpus>/.claude/)
+tests/*/.claude/

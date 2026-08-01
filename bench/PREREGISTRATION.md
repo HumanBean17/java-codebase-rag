@@ -228,3 +228,89 @@ record. Re-run on the CLI surface with `.venv/bin/python -m bench.run_bench`.
 `prompt_file` for all four conditions are the new surface binding; the
 condition *intent*, the 50-question inventory, the oracle, and the grading split
 are unchanged.
+
+## Amendment 2026-07-28 (Plan 4 follow-up: cross-service grading → llm_judge)
+
+The 10 cross-service questions (`bc-cs-01..06`, `pt-cs-01..04`; all `claim_refs:
+C3`) are re-graded from the programmatic `client_route_match` extractor to the
+**blinded `glm-5.2` LLM judge** — the same path already used for the semantic
+questions. This is a *grader-method* change on one category, not a claim change:
+C3 remains the claim under test, and the oracle (`client_route_pairs`) is
+unchanged; only how an answer is compared to it moves.
+
+**(a) Why — the positional extractor false-negatives correct answers.**
+`extract_client_routes` pairs each `METHOD /path` with the nearest preceding
+class-like token. When an answer interleaves the client class with a Java code
+block (the natural shape for a Feign-client answer), the heuristic grabs a
+code-block token instead. Validated on the 2026-07-28 CLI smoke: `bc-cs-01_D`'s
+answer correctly named the client FQN (`…ChatCoreFeignClient`), the route
+(`GET /api/v1/chat/sessions/{conversationId}`), and the target service
+(`chat-core`) — an exact oracle triplet — yet scored **0.00** because the route
+was paired with a `@PathVariable("conversationId")` token. The positional
+heuristic cannot be patched into robustness (filtering camelCase variables still
+leaves the return type `SessionInfo` to be mis-grabbed). Filtering the answer
+text is exactly the brittle step; cross-service answers are open-ended natural
+language, structurally like the semantic questions already entrusted to the
+judge.
+
+**(b) Effect — the judge scores it correctly.** Re-graded under `llm_judge`,
+`bc-cs-01_D` scored **1.00** with the rationale "correctly identifies
+chat-assign, `ChatCoreFeignClient`, and the GET route." The fix unmasked the
+C3 signal the bug was hiding: on `bc-cs-01`, D = 1.00 while A/B/C = 0.00
+(they cap — the cross-service question is unreachable without graph edges); the
+positional grader had rendered all four as 0.00, making D's cross-service win
+invisible.
+
+**(c) Scope & cost.** `by_method` shifts: `llm_judge` questions 4 → 14 (the 4
+semantic + 10 cross-service). Blast radius in the full run: 10 questions × 4
+conditions × 2 models × 3 seeds = 240 cells routed to the judge (capped cells
+still short-circuit to 0 with no judge call, per Plan 3); ≈$10 of added judge
+cost. `grade_client_route_match` / `extract_client_routes` and their unit tests
+are **retained** as a documented programmatic fallback; no question is wired to
+them. Capped cross-service cells keep the Plan-3 cap→0 short-circuit.
+
+**(d) Same fix extended to call-trace and absence (validated on the 2026-07-28
+pilot).** The two remaining non-`set_match` programmatic graders showed the
+*identical* brittle-extraction false-negative class on real cells, and are
+moved to `llm_judge` for the same reason:
+
+  * **call-trace → `programmatic_path_match` → `llm_judge`** (5 questions:
+    `bc/sh/pt-trace-*`, `claim_refs: C1,C2`). `extract_path` could not survive
+    numbered-list answers interleaving class headers, method calls, and file
+    paths — it shredded a *correct* `bc-trace-01_D` path into `['Call','POST',
+    …,'publishTrigger','Kafka',…]` and scored it 0.33 (jaccard) instead of
+    ~1.0. The judge also credits the right semantics (expected hops appearing
+    in order as a subsequence; extra depth is fine), which strict set-jaccard
+    penalized.
+  * **absence → `absence_check` → `llm_judge`** (3 questions: `bc/sh/pt-abs-*`,
+    `claim_refs: C1`). Binary phrase detection (`"there is no"`/`"does not
+    exist"`/`"not present"`/`"no <x>"`) false-negatived a correct
+    `bc-abs-01_C` answer ("…not Redis") to 0.00 while an equivalent
+    `bc-abs-01_D` ("…no Redis") scored 1.00 — pure phrasing roulette.
+
+Net effect: `by_method` is now `set_match` 28 (interface-impls /
+upstream-consumers / role-listing / blast-radius — robust simple-name set
+overlap) + `llm_judge` 22 (semantic / cross-service / call-trace / absence —
+all open-ended NL). The three brittle positional/phrase graders
+(`client_route_match`, `path_match`, `absence_check`) and their unit tests are
+retained as documented fallbacks; no question is wired to them. `set_match` was
+spot-checked and is robust (tokenization is format-tolerant). Additional judge
+cost vs the original plan: ≈$13 total. Claims C1–C6 unchanged.
+
+**(e) `set_match` metric: F1 → F2 / recall-weighted (validated on the 2026-07-28
+pilot).** The remaining programmatic grader (28 questions: interface-impls /
+upstream-consumers / role-listing / blast-radius) used F1 over format-agnostic
+tokenization. `extract_simple_names` deliberately pulls every uppercase token,
+so an *explanatory* answer that found every expected symbol but described each
+one (prose mentions of related types like `InternalEvent` / `Client`) was
+penalized as if those mentions were spurious predictions — `bc-impl-02_D`
+correctly listed both expected `EventFilter` implementers yet scored 0.27.
+`correctness` is now **F2** (recall-weighted F-measure, β=2: recall weighted 4×
+over precision). Pure recall was rejected: it made `set_match` uninformative by
+rewarding spraying (an answer that listed ~24 names and incidentally hit a
+1-element expected set, `bc-blast-02_C`, scored 1.0). F2 lessens the prose
+penalty (verbose-correct 0.27→~0.47) while keeping spray low (0.08→~0.17).
+`precision` / `recall` / `f1` are retained in `detail`. This is a *calibration*
+change (under-credit, not a false-zero), uniform across conditions, and removes
+a possible verbosity-confound between conditions. The grader stays programmatic
+/ objective (no judge cost). Claims C1–C6 unchanged.

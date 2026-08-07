@@ -21,6 +21,11 @@ from typing import Literal, NamedTuple
 
 import yaml
 
+from java_codebase_rag.graph.path_filtering import (
+    UNCONDITIONAL_PRUNE_DIRS,
+    _is_build_output_dir,
+)
+
 Scope = Literal["project", "user"]
 Surface = Literal["mcp", "cli"]
 
@@ -222,45 +227,112 @@ def prompt(
         raise SystemExit(2)
 
 
-def detect_java_directories(source_root: Path) -> list[Path]:
-    """Return Maven/Gradle module roots. If root has build file, returns [Path('.')].
+# ---------------------------------------------------------------------------
+# Java source-root layout detection
+# ---------------------------------------------------------------------------
 
-    Checks if source_root itself contains a build file (pom.xml, build.gradle, build.gradle.kts).
-    If YES: returns [Path(".")] — the entire project is indexed as one unit.
-    If NO: scans immediate children for directories containing build files.
+LAYOUT_SINGLE_MODULE = "single_module"
+LAYOUT_SIBLING_MODULES = "sibling_modules"
+LAYOUT_MULTI_SYSTEM = "multi_system"
 
-    Args:
-        source_root: Root directory to scan for Java projects
+# Keep in sync with graph_enrich.BUILD_MARKERS.
+BUILD_FILES: tuple[str, ...] = ("pom.xml", "build.gradle", "build.gradle.kts", "build.sbt")
 
-    Returns:
-        List of detected module roots (relative to source_root)
 
-    Raises:
-        SystemExit(2): If no build files found in source_root or immediate children
+@dataclass(frozen=True)
+class JavaDetection:
+    """Result of :func:`detect_java_layout`.
+
+    ``kind`` is exactly one of the ``LAYOUT_*`` constants. ``roots`` holds module
+    roots relative to ``source_root`` (``[Path(".")]`` for single-module and
+    multi-system; the list of immediate-child dir names for sibling-modules).
+    ``system_dirs`` is the sorted set of top-level directory names under
+    ``source_root`` that contain a discovered build marker — non-empty ONLY for
+    the multi-system kind.
     """
-    build_files = ["pom.xml", "build.gradle", "build.gradle.kts"]
 
-    # Check if source_root itself has a build file
-    for bf in build_files:
+    kind: str
+    roots: list[Path]
+    system_dirs: list[str]
+
+
+def detect_java_layout(source_root: Path) -> JavaDetection:
+    """Classify the Java build layout under ``source_root``.
+
+    Evaluates, in order:
+      1. Single module — a ``BUILD_FILES`` marker is a file directly in
+         ``source_root``.
+      2. Sibling modules — no root marker, but immediate-child directories hold
+         ``BUILD_FILES`` markers (iterdir order).
+      3. Multi-system parent — no root or immediate-child marker, but a bounded
+         recursive descent discovers a marker deeper. Prune semantics mirror the
+         indexer walk (``UNCONDITIONAL_PRUNE_DIRS`` + ``_is_build_output_dir``);
+         any directory that itself holds a marker is a leaf (recorded, not
+         descended into).
+      4. No Java — no marker anywhere under ``source_root``: print an error and
+         raise ``SystemExit(2)``.
+    """
+    # 1. Single module — marker directly in source_root.
+    for bf in BUILD_FILES:
         if (source_root / bf).is_file():
-            return [Path(".")]
+            return JavaDetection(LAYOUT_SINGLE_MODULE, [Path(".")], [])
 
-    # Scan immediate children for build files
-    detected = []
+    # 2. Sibling modules — immediate children holding a marker.
+    sibling_roots: list[Path] = []
     for child in source_root.iterdir():
         if not child.is_dir():
             continue
-        # Check if this child directory has a build file
-        for bf in build_files:
+        for bf in BUILD_FILES:
             if (child / bf).is_file():
-                detected.append(Path(child.name))
+                sibling_roots.append(Path(child.name))
                 break
+    if sibling_roots:
+        return JavaDetection(LAYOUT_SIBLING_MODULES, sibling_roots, [])
 
-    if not detected:
-        print(f"Error: No Java build files (pom.xml, build.gradle, build.gradle.kts) found in {source_root} or its immediate children.")
-        raise SystemExit(2)
+    # 3. Multi-system parent — bounded recursive descent for a marker deeper
+    #    than the immediate children. Prune the indexer's nuisance dirs and
+    #    build outputs at each step; treat any dir that itself holds a marker as
+    #    a leaf (record it, do not descend into it).
+    discovered_marker_dirs: list[Path] = []
+    for dirpath, dirnames, _filenames in os.walk(source_root):
+        # Prune in place so os.walk skips these subtrees (mirrors
+        # path_filtering.iter_source_files' walk).
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in UNCONDITIONAL_PRUNE_DIRS
+            and not _is_build_output_dir(dirpath, d)
+        ]
+        if any((Path(dirpath) / bf).is_file() for bf in BUILD_FILES):
+            discovered_marker_dirs.append(Path(dirpath))
+            dirnames[:] = []  # leaf: do not descend further
 
-    return detected
+    if discovered_marker_dirs:
+        system_set: set[str] = set()
+        for marker_dir in discovered_marker_dirs:
+            try:
+                rel = marker_dir.relative_to(source_root)
+            except ValueError:
+                continue
+            if rel.parts:
+                system_set.add(rel.parts[0])
+        return JavaDetection(LAYOUT_MULTI_SYSTEM, [Path(".")], sorted(system_set))
+
+    # 4. No Java build files anywhere under source_root.
+    print(
+        f"Error: No Java build files (pom.xml, build.gradle, build.gradle.kts, "
+        f"build.sbt) found in {source_root} or its subtree."
+    )
+    raise SystemExit(2)
+
+
+def _multi_system_summary(system_dirs: list[str]) -> str:
+    """One-line human-readable summary printed for a multi-system layout."""
+    joined = ", ".join(f"{d}/" for d in system_dirs)
+    return (
+        f"Multi-system workspace — found Java under: {joined}. "
+        f"Indexing all as one merged index."
+    )
 
 
 def confirm_source_root(cwd: Path, *, non_interactive: bool) -> Path:
@@ -413,7 +485,7 @@ def select_microservices(
 
     Args:
         java_dirs: Detected module roots (relative Path names) from
-            detect_java_directories. Caller must pass len >= 2.
+            detect_java_layout. Caller must pass len >= 2.
         non_interactive: If True, return None (all) without prompting.
         preselected: On re-run, the prior microservice_roots subset to pre-check.
     """
@@ -2044,25 +2116,33 @@ def run_install(
     # Stage 1: Java source detection (with confirmation in interactive mode)
     source_root = confirm_source_root(cwd, non_interactive=non_interactive)
 
-    # Detect Java directories
+    # Detect Java layout (single module / sibling modules / multi-system parent).
     try:
-        java_dirs = detect_java_directories(source_root)
+        detection = detect_java_layout(source_root)
     except SystemExit as e:
         return e.code
 
-    # Stage 1 (Case B): interactive microservice selection (only when 2+ detected)
-    try:
-        selected_roots = (
-            select_microservices(
-                java_dirs,
-                non_interactive=non_interactive,
-                preselected=existing_config.get("microservice_roots") if existing_config else None,
+    if detection.kind == LAYOUT_MULTI_SYSTEM:
+        # A parent source-root of nested Java systems: index everything as one
+        # merged index. The name-based microservice_roots key cannot express a
+        # nested subset, so skip the subset-picker (selected_roots stays None ->
+        # generate_yaml_config omits the key -> the whole tree is indexed).
+        print(_multi_system_summary(detection.system_dirs))
+        selected_roots = None
+    else:
+        # Stage 1 (Case B): interactive microservice selection (only when 2+ roots).
+        try:
+            selected_roots = (
+                select_microservices(
+                    detection.roots,
+                    non_interactive=non_interactive,
+                    preselected=existing_config.get("microservice_roots") if existing_config else None,
+                )
+                if len(detection.roots) >= 2
+                else None
             )
-            if len(java_dirs) >= 2
-            else None
-        )
-    except SystemExit as e:
-        return e.code
+        except SystemExit as e:
+            return e.code
 
     # Stage 2: Embedding model
     from java_codebase_rag.pipeline import vector_stack_installed

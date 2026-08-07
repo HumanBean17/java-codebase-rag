@@ -98,59 +98,218 @@ class TestPromptHelper:
         assert prompt("confirm", "test", default=True) is True
 
 
-class TestDetectJavaDirectories:
-    """Test detect_java_directories function."""
+class TestDetectJavaLayout:
+    """Test detect_java_layout (single-module / sibling-modules / multi-system)."""
 
-    def test_detect_java_root_has_maven_pom(self, tmp_path):
-        """cwd with pom.xml → returns [Path('.')]"""
+    def test_detect_layout_root_has_maven_pom(self, tmp_path):
+        """source_root with pom.xml → single-module layout"""
         (tmp_path / "pom.xml").write_text("<project></project>")
-        from java_codebase_rag.installer import detect_java_directories
-        result = detect_java_directories(tmp_path)
-        assert result == [Path(".")]
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            JavaDetection,
+            LAYOUT_SINGLE_MODULE,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result == JavaDetection(
+            kind=LAYOUT_SINGLE_MODULE, roots=[Path(".")], system_dirs=[]
+        )
 
-    def test_detect_java_root_has_gradle_build(self, tmp_path):
-        """cwd with build.gradle → returns [Path('.')]"""
+    def test_detect_layout_root_has_gradle_build(self, tmp_path):
+        """source_root with build.gradle → single-module layout"""
         (tmp_path / "build.gradle").write_text("plugins { id 'java' }")
-        from java_codebase_rag.installer import detect_java_directories
-        result = detect_java_directories(tmp_path)
-        assert result == [Path(".")]
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            JavaDetection,
+            LAYOUT_SINGLE_MODULE,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result == JavaDetection(
+            kind=LAYOUT_SINGLE_MODULE, roots=[Path(".")], system_dirs=[]
+        )
 
-    def test_detect_java_root_has_gradle_kts(self, tmp_path):
-        """cwd with build.gradle.kts → returns [Path('.')]"""
+    def test_detect_layout_root_has_gradle_kts(self, tmp_path):
+        """source_root with build.gradle.kts → single-module layout"""
         (tmp_path / "build.gradle.kts").write_text("plugins { java }")
-        from java_codebase_rag.installer import detect_java_directories
-        result = detect_java_directories(tmp_path)
-        assert result == [Path(".")]
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            JavaDetection,
+            LAYOUT_SINGLE_MODULE,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result == JavaDetection(
+            kind=LAYOUT_SINGLE_MODULE, roots=[Path(".")], system_dirs=[]
+        )
 
-    def test_detect_java_no_root_microservice_monorepo(self, tmp_path):
-        """cwd has no build file, service-a/pom.xml and service-b/pom.xml exist → returns [Path('service-a'), Path('service-b')]"""
+    def test_detect_layout_sibling_modules_monorepo(self, tmp_path):
+        """no root marker; service-a/pom.xml + service-b/pom.xml → sibling_modules"""
         service_a = tmp_path / "service-a"
         service_b = tmp_path / "service-b"
         service_a.mkdir()
         service_b.mkdir()
         (service_a / "pom.xml").write_text("<project></project>")
         (service_b / "pom.xml").write_text("<project></project>")
-        from java_codebase_rag.installer import detect_java_directories
-        result = detect_java_directories(tmp_path)
-        assert set(result) == {Path("service-a"), Path("service-b")}
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_SIBLING_MODULES,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_SIBLING_MODULES
+        assert set(result.roots) == {Path("service-a"), Path("service-b")}
+        assert result.system_dirs == []
 
-    def test_detect_java_no_root_single_service(self, tmp_path):
-        """cwd has no build file, only service-a/pom.xml exists → returns [Path('service-a')]"""
+    def test_detect_layout_sibling_modules_single_service(self, tmp_path):
+        """no root marker; only service-a/pom.xml → sibling_modules, [service-a]"""
         service_a = tmp_path / "service-a"
         service_a.mkdir()
         (service_a / "pom.xml").write_text("<project></project>")
-        from java_codebase_rag.installer import detect_java_directories
-        result = detect_java_directories(tmp_path)
-        assert result == [Path("service-a")]
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_SIBLING_MODULES,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_SIBLING_MODULES
+        assert result.roots == [Path("service-a")]
+        assert result.system_dirs == []
 
-    def test_detect_java_no_root_no_services_exit_2(self, tmp_path, capsys):
-        """cwd has no build file, no children have build files → raises SystemExit(2)"""
-        from java_codebase_rag.installer import detect_java_directories
+    def test_detect_layout_no_java_raises_exit_2(self, tmp_path, capsys):
+        """no build files anywhere under source_root → SystemExit(2)"""
+        from java_codebase_rag.installer import detect_java_layout
         with pytest.raises(SystemExit) as exc_info:
-            detect_java_directories(tmp_path)
+            detect_java_layout(tmp_path)
         assert exc_info.value.code == 2
         captured = capsys.readouterr()
-        assert "Error:" in captured.out and "No Java build files" in captured.out
+        assert "Error:" in captured.out
+        assert "No Java build files" in captured.out
+
+    # --- Multi-system parent layout ---
+
+    def test_detect_layout_multi_system_happy_path(self, tmp_path):
+        """SystemA/microservice-1/pom.xml + SystemB/microservice-2/pom.xml → multi_system"""
+        sys_a = tmp_path / "SystemA" / "microservice-1"
+        sys_b = tmp_path / "SystemB" / "microservice-2"
+        sys_a.mkdir(parents=True)
+        sys_b.mkdir(parents=True)
+        (sys_a / "pom.xml").write_text("<project></project>")
+        (sys_b / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_MULTI_SYSTEM,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_MULTI_SYSTEM
+        assert result.roots == [Path(".")]
+        assert set(result.system_dirs) == {"SystemA", "SystemB"}
+
+    def test_detect_layout_multi_system_leaf_rule(self, tmp_path):
+        """microservice-1/pom.xml makes microservice-1 a leaf; nested sub-mod/pom.xml not counted"""
+        leaf = tmp_path / "SystemA" / "microservice-1"
+        leaf.mkdir(parents=True)
+        (leaf / "pom.xml").write_text("<project></project>")
+        (leaf / "sub-mod").mkdir()
+        (leaf / "sub-mod" / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import detect_java_layout
+        result = detect_java_layout(tmp_path)
+        assert set(result.system_dirs) == {"SystemA"}
+
+    def test_detect_layout_multi_system_prunes_node_modules(self, tmp_path):
+        """node_modules subtree pruned via UNCONDITIONAL_PRUNE_DIRS"""
+        sys_a = tmp_path / "SystemA" / "microservice-1"
+        sys_a.mkdir(parents=True)
+        (sys_a / "pom.xml").write_text("<project></project>")
+        evil = tmp_path / "node_modules" / "evil"
+        evil.mkdir(parents=True)
+        (evil / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import detect_java_layout
+        result = detect_java_layout(tmp_path)
+        assert set(result.system_dirs) == {"SystemA"}
+
+    def test_detect_layout_multi_system_recognizes_build_sbt(self, tmp_path):
+        """build.sbt is a recognized marker (BUILD_FILES includes build.sbt)"""
+        sys_a = tmp_path / "SystemA" / "microservice-1"
+        sys_a.mkdir(parents=True)
+        (sys_a / "build.sbt").write_text('name := "microservice-1"')
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_MULTI_SYSTEM,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_MULTI_SYSTEM
+        assert set(result.system_dirs) == {"SystemA"}
+
+    def test_detect_layout_multi_system_prunes_build_output_dir(self, tmp_path):
+        """stale target/pom.xml under a real module is pruned via the
+        build-output rule (_is_build_output_dir / prune_walk_dirnames).
+
+        The target/ marker is pruned because its parent microservice-1 holds a
+        build-tool indicator (pom.xml). Routing through prune_walk_dirnames (Fix 2)
+        also exercises the shared helper.
+        """
+        mod = tmp_path / "SystemA" / "microservice-1"
+        mod.mkdir(parents=True)
+        (mod / "pom.xml").write_text("<project></project>")
+        # Stale build-output marker inside microservice-1/target/.
+        (mod / "target").mkdir()
+        (mod / "target" / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_MULTI_SYSTEM,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_MULTI_SYSTEM
+        assert set(result.system_dirs) == {"SystemA"}
+
+    def test_detect_layout_sibling_beats_multi_system_precedence(self, tmp_path):
+        """immediate-child marker (service-a/pom.xml) wins over a deeper
+        marker (SystemB/microservice-2/pom.xml) — sibling-modules precedence."""
+        service_a = tmp_path / "service-a"
+        service_a.mkdir()
+        (service_a / "pom.xml").write_text("<project></project>")
+        sys_b = tmp_path / "SystemB" / "microservice-2"
+        sys_b.mkdir(parents=True)
+        (sys_b / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_SIBLING_MODULES,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_SIBLING_MODULES
+        assert result.roots == [Path("service-a")]
+        assert result.system_dirs == []
+
+    def test_detect_layout_no_java_exit_2_via_multi_system_descent(
+        self, tmp_path, capsys
+    ):
+        """only a pruned marker (node_modules/evil/pom.xml) → descent runs,
+        prunes node_modules, finds nothing usable, falls through to exit 2.
+
+        Proves the multi-system descent runs (not a false-positive detection),
+        prunes correctly, and reaches the no-Java exit-2 path.
+        """
+        from java_codebase_rag.installer import detect_java_layout
+
+        evil = tmp_path / "node_modules" / "evil"
+        evil.mkdir(parents=True)
+        (evil / "pom.xml").write_text("<project></project>")
+        with pytest.raises(SystemExit) as exc_info:
+            detect_java_layout(tmp_path)
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "No Java build files" in captured.out
+        assert "subtree" in captured.out
+
+
+class TestMultiSystemSummary:
+    """Test _multi_system_summary helper."""
+
+    def test_multi_system_summary_format(self):
+        from java_codebase_rag.installer import _multi_system_summary
+        result = _multi_system_summary(["SystemA", "SystemB"])
+        assert "Multi-system workspace" in result
+        assert "SystemA/" in result
+        assert "SystemB/" in result
+        assert "Indexing all as one merged index" in result
+        # Not a str(list) repr — a single formatted string.
+        assert "['SystemA'" not in result
 
 
 class TestSelectMicroservices:
@@ -822,6 +981,88 @@ class TestInstallIntegration:
         assert gitignore.is_file()
         gitignore_content = gitignore.read_text()
         assert ".java-codebase-rag/" in gitignore_content
+
+    def test_install_non_interactive_multi_system_workspace(self, tmp_path, monkeypatch, capsys):
+        """run install over a multi-system parent source-root (no microservice_roots).
+
+        Layout (built directly in tmp_path, no committed fixture):
+            SystemA/microservice-1/pom.xml + src/main/java/com/acme/Foo.java
+            SystemB/microservice-2/pom.xml + src/main/java/com/acme/Bar.java
+        detect_java_layout classifies this as multi_system; run_install prints the
+        multi-system summary and indexes everything as one merged index (no
+        microservice_roots key in the generated YAML).
+        """
+        import shutil
+        import subprocess
+        from java_codebase_rag.installer import run_install
+
+        # Build the multi-system layout directly in tmp_path.
+        for system, micro, java_cls in [
+            ("SystemA", "microservice-1", "Foo"),
+            ("SystemB", "microservice-2", "Bar"),
+        ]:
+            mod = tmp_path / system / micro
+            (mod / "src" / "main" / "java" / "com" / "acme").mkdir(parents=True)
+            (mod / "pom.xml").write_text("<project></project>")
+            (mod / "src" / "main" / "java" / "com" / "acme" / f"{java_cls}.java").write_text(
+                f"package com.acme; class {java_cls} {{}}"
+            )
+
+        # .git so update_gitignore runs.
+        (tmp_path / ".git").mkdir()
+
+        # Mock MCP binary discovery.
+        monkeypatch.setattr(shutil, "which", lambda x: "/fake/bin/java-codebase-rag-mcp")
+
+        # Mock the fresh-init indexing helpers (no pre-existing index → init path).
+        monkeypatch.setattr(
+            "java_codebase_rag.pipeline.run_cocoindex_update",
+            lambda *a, **k: subprocess.CompletedProcess(args=["cocoindex"], returncode=0),
+        )
+        monkeypatch.setattr(
+            "java_codebase_rag.pipeline.run_build_ast_graph",
+            lambda *a, **k: subprocess.CompletedProcess(args=["build_ast_graph"], returncode=0),
+        )
+
+        # run_install resolves source_root from Path.cwd() when None; align cwd.
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        result = run_install(
+            non_interactive=True,
+            agents=["claude-code"],
+            scope="project",
+            model="auto",
+            surface="mcp",
+            source_root=tmp_path,
+            quiet=True,
+        )
+
+        # Exit success.
+        assert result == 0
+
+        # YAML parses and carries NO microservice_roots (multi-system = index all).
+        import yaml
+        yaml_path = tmp_path / ".java-codebase-rag.yml"
+        assert yaml_path.is_file()
+        config = yaml.safe_load(yaml_path.read_text())
+        assert "microservice_roots" not in config
+
+        # MCP config has the java-codebase-rag stdio entry.
+        mcp_path = tmp_path / ".mcp.json"
+        assert mcp_path.is_file()
+        mcp_config = json.loads(mcp_path.read_text())
+        assert "java-codebase-rag" in mcp_config.get("mcpServers", {})
+        assert mcp_config["mcpServers"]["java-codebase-rag"]["type"] == "stdio"
+
+        # Skill and agent deployed under tmp_path/.claude/.
+        assert (tmp_path / ".claude" / "skills" / "explore-codebase" / "SKILL.md").is_file()
+        assert (tmp_path / ".claude" / "agents" / "explorer-rag-enhanced.md").is_file()
+
+        # Multi-system summary printed to stdout (quiet=True suppresses only stderr).
+        captured = capsys.readouterr()
+        assert "Multi-system workspace" in captured.out
+        assert "SystemA/" in captured.out
+        assert "SystemB/" in captured.out
 
     def test_install_non_interactive_multi_host_bank_chat(self, tmp_path, monkeypatch):
         """run install --non-interactive --agent claude-code --agent qwen-code"""

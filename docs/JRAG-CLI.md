@@ -65,6 +65,34 @@ jrag install --scope user
 
 **Re-running `install`:** If `.java-codebase-rag.yml` exists, the installer shows current values and offers "Update" (pre-filled) or "Start fresh". Existing MCP entries are updated in-place (merged, not duplicated). Skill/agent files trigger overwrite confirmation.
 
+#### Multi-system workspace
+
+`jrag` accepts a **parent source-root** that contains several nested Java systems, not just a single repo. The typical layout is a grouping directory whose immediate children are independent systems, each a multi-module Maven/Gradle reactor:
+
+```
+WorkingProject/
+├─ SystemA/
+│  └─ microservice-1/        # pom.xml / build.gradle here
+│     └─ src/main/java/...
+└─ SystemB/
+   └─ microservice-2/        # pom.xml / build.gradle here
+      └─ src/main/java/...
+```
+
+Point the installer at the parent:
+
+```bash
+jrag install --source-root WorkingProject
+# or, from inside the parent:
+cd WorkingProject && jrag install
+```
+
+Detection recognises the multi-system layout, prints the systems it found (`Multi-system workspace — found Java under: SystemA/, SystemB/. Indexing all as one merged index.`), and builds **one merged index** at `WorkingProject/.java-codebase-rag/`. The generated `.java-codebase-rag.yml` **omits `microservice_roots`** — every system is indexed (the name-list key cannot express a nested subset), so `jrag` walks the whole tree. Cross-service edges (`HTTP_CALLS` / `ASYNC_CALLS`) resolve within the single graph, so cross-system questions ("what calls into `SystemA` from `SystemB`?") work without extra configuration.
+
+`jrag init --source-root WorkingProject` does the same — builds one merged index directly, skipping the wizard.
+
+> **Parent-POM caveat (`microservice` attribution).** If the `System*/` grouping directories themselves carry an aggregator `pom.xml` (or other build marker), `microservice` attribution **rolls up to the System name** (`SystemA`), while `module` keeps inner-module granularity (`microservice-1`). When the `System*/` dirs have *no* marker, `microservice` resolves to the inner microservice name (`microservice-1`) via the outermost-marker fallback. See [`CODEBASE_REQUIREMENTS.md`](./CODEBASE_REQUIREMENTS.md) §A.1 (Two location concepts: `module` and `microservice`).
+
 ### `update`
 
 Post-upgrade refresh: overwrites skill and agent files with the latest shipped versions and updates the MCP command path. If an index exists, also runs an incremental Lance + graph catch-up (same as `increment`). Can also switch the agent surface (`mcp` ↔ `cli`) for an existing install. Requires a prior `install` run.

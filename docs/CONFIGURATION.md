@@ -43,6 +43,8 @@ The tool automatically walks up the directory tree from the current working dire
 
 This walk-up behavior means you no longer need to set environment variables or pass flags when working from within a project — the tool finds the config automatically.
 
+**Multi-system workspace.** For a multi-system workspace — pointing `jrag` at a *parent directory of nested Java systems* (e.g. `jrag install --source-root WorkingProject` where `WorkingProject/{SystemA/microservice-1, SystemB/microservice-2}` are each independent reactors; see [`JRAG-CLI.md`](./JRAG-CLI.md) § Multi-system workspace and [`CODEBASE_REQUIREMENTS.md`](./CODEBASE_REQUIREMENTS.md) §A.1) — the `.java-codebase-rag.yml` and the `.java-codebase-rag/` index both live at that **parent directory**, and `source_root` resolves to the parent. Because walk-up discovery checks *ancestor* directories, an agent working from inside a nested microservice (e.g. `WorkingProject/SystemA/microservice-1/`) finds the parent YAML simply by walking up to `WorkingProject/`. The sibling-config bridge above (`.java-codebase-rag/config_source` inside the index dir) covers the case where the YAML lives in a *sibling* of the Java tree rather than as an ancestor.
+
 | Variable | Purpose |
 |---|---|
 | `JAVA_CODEBASE_RAG_INDEX_DIR` | Local filesystem **directory** for Lance tables, the LadybugDB file `code_graph.lbug`, and cocoindex state (`cocoindex.db`). Not a `lancedb://` or cloud URI — use a path. Default: `./.java-codebase-rag/` under the resolved Java tree root. |

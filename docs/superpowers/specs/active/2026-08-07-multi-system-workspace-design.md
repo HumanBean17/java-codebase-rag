@@ -1,7 +1,7 @@
 # Multi-system workspace indexing (parent source-root)
 
 - **Date:** 2026-08-07
-- **Status:** in_progress
+- **Status:** implemented
 
 ## Motivation
 

@@ -81,6 +81,21 @@ inside the MCP.
     and the MCP will accept them as the `microservice=...`
     filter values. Anything else returns an empty `microservice` and
     `microservice=` filters become useless.
+  - **Multi-system workspace (parent source-root).** Pointing `jrag` at a
+    *parent directory of nested systems* is supported by both the wizard
+    (`jrag install --source-root WorkingProject`) and `init` (`jrag init
+    --source-root WorkingProject`). Detection recognises the layout,
+    prints the systems found, and builds one merged index at
+    `<parent>/.java-codebase-rag/`; the generated `.java-codebase-rag.yml`
+    omits `microservice_roots` (every system is indexed — see
+    [`JRAG-CLI.md`](./JRAG-CLI.md) § Multi-system workspace). For a tree
+    like `WorkingProject/{SystemA/microservice-1, SystemB/microservice-2}`
+    with build markers at the `System*/microservice-*/` level only,
+    `microservice_for_path` returns the inner microservice name
+    (`microservice-1`) via the outermost-marker fallback, and `module`
+    keeps its inner-module value. If the `System*/` grouping dirs
+    themselves carry an aggregator `pom.xml`, `microservice` rolls up to
+    the System name (`SystemA`) — `module` is unchanged.
   - See: `graph_enrich.py::module_for_path`,
     `graph_enrich.py::microservice_for_path`, constant `BUILD_MARKERS`.
 - **Build outputs out of the way.** `target/`, `build/`, `node_modules/`,

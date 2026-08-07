@@ -91,6 +91,24 @@ def _is_build_output_dir(parent_dir: str, dirname: str) -> bool:
     return any(marker in siblings for marker in BUILD_TOOL_INDICATORS)
 
 
+def prune_walk_dirnames(dirpath: str, dirnames: list[str]) -> None:
+    """Single source of truth for the indexer's walk-time directory pruning.
+
+    Drops entries from ``dirnames`` **in place** when they are universal
+    nuisance dirs (:data:`UNCONDITIONAL_PRUNE_DIRS`) or build-output dirs
+    (:func:`_is_build_output_dir`). Used by both :func:`iter_source_files`
+    (the production indexer walk) and the install wizard's
+    :func:`~java_codebase_rag.installer.detect_java_layout` detection walk,
+    so the two scans share identical prune semantics.
+    """
+    dirnames[:] = [
+        d
+        for d in dirnames
+        if d not in UNCONDITIONAL_PRUNE_DIRS
+        and not _is_build_output_dir(dirpath, d)
+    ]
+
+
 def compile_excluded_glob_patterns(
     patterns: Sequence[str] | tuple[str, ...],
 ) -> list[str]:
@@ -475,13 +493,8 @@ def iter_source_files(
         # Build-output dirs (``out`` / ``build`` / ``target``) are pruned only when
         # they sit alongside a build-tool indicator file — otherwise names like
         # ``out`` belong to a Java package (e.g. ``com.example.out.api``) and must
-        # be walked. See ``_is_build_output_dir``.
-        dirnames[:] = [
-            d
-            for d in dirnames
-            if d not in UNCONDITIONAL_PRUNE_DIRS
-            and not _is_build_output_dir(dirpath, d)
-        ]
+        # be walked. See ``prune_walk_dirnames``.
+        prune_walk_dirnames(dirpath, dirnames)
         for fn in filenames:
             # Literal byte-identity match (mirrors the legacy ``endswith``
             # behaviour): ``Path(".java").suffix`` is ``""``, so a dotfile named

@@ -21,10 +21,7 @@ from typing import Literal, NamedTuple
 
 import yaml
 
-from java_codebase_rag.graph.path_filtering import (
-    UNCONDITIONAL_PRUNE_DIRS,
-    _is_build_output_dir,
-)
+from java_codebase_rag.graph.path_filtering import prune_walk_dirnames
 
 Scope = Literal["project", "user"]
 Surface = Literal["mcp", "cli"]
@@ -266,9 +263,8 @@ def detect_java_layout(source_root: Path) -> JavaDetection:
          ``BUILD_FILES`` markers (iterdir order).
       3. Multi-system parent — no root or immediate-child marker, but a bounded
          recursive descent discovers a marker deeper. Prune semantics mirror the
-         indexer walk (``UNCONDITIONAL_PRUNE_DIRS`` + ``_is_build_output_dir``);
-         any directory that itself holds a marker is a leaf (recorded, not
-         descended into).
+         indexer walk (:func:`prune_walk_dirnames`); any directory that itself
+         holds a marker is a leaf (recorded, not descended into).
       4. No Java — no marker anywhere under ``source_root``: print an error and
          raise ``SystemExit(2)``.
     """
@@ -296,13 +292,8 @@ def detect_java_layout(source_root: Path) -> JavaDetection:
     discovered_marker_dirs: list[Path] = []
     for dirpath, dirnames, _filenames in os.walk(source_root):
         # Prune in place so os.walk skips these subtrees (mirrors
-        # path_filtering.iter_source_files' walk).
-        dirnames[:] = [
-            d
-            for d in dirnames
-            if d not in UNCONDITIONAL_PRUNE_DIRS
-            and not _is_build_output_dir(dirpath, d)
-        ]
+        # path_filtering.iter_source_files' walk via the shared helper).
+        prune_walk_dirnames(dirpath, dirnames)
         if any((Path(dirpath) / bf).is_file() for bf in BUILD_FILES):
             discovered_marker_dirs.append(Path(dirpath))
             dirnames[:] = []  # leaf: do not descend further

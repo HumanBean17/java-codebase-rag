@@ -81,6 +81,35 @@ def test_no_build_marker_falls_back_to_top_level_directory(monorepo: Path) -> No
     assert microservice_for_path(str(f), monorepo) == "loose"
 
 
+def test_microservice_for_path_nested_multi_system_parent(tmp_path: Path) -> None:
+    """Multi-system parent layout: each system groups several microservices
+    under a top-level dir that has no build marker of its own.
+
+        <root>/
+          SystemA/                       <- grouping dir, NO marker
+            microservice-1/
+              pom.xml                    <- marker ⇒ microservice = microservice-1
+              src/main/java/com/acme/Foo.java
+          SystemB/                       <- grouping dir, NO marker
+            microservice-2/
+              pom.xml                    <- marker ⇒ microservice = microservice-2
+              src/main/java/com/acme/Bar.java
+
+    The outermost-marker fallback must return the inner microservice name
+    (microservice-1 / microservice-2), not the SystemA/SystemB grouping dir.
+    """
+    root = tmp_path / "workspace"
+    _touch(root / "SystemA/microservice-1/pom.xml")
+    _touch(root / "SystemA/microservice-1/src/main/java/com/acme/Foo.java", "class Foo {}")
+    _touch(root / "SystemB/microservice-2/pom.xml")
+    _touch(root / "SystemB/microservice-2/src/main/java/com/acme/Bar.java", "class Bar {}")
+
+    f_a = root / "SystemA/microservice-1/src/main/java/com/acme/Foo.java"
+    f_b = root / "SystemB/microservice-2/src/main/java/com/acme/Bar.java"
+    assert microservice_for_path(str(f_a), root) == "microservice-1"
+    assert microservice_for_path(str(f_b), root) == "microservice-2"
+
+
 def test_yaml_mod_a_override(monorepo: Path) -> None:
     """`microservice_roots:` in `.java-codebase-rag.yml` can promote a module path."""
     _load_config_microservice_roots.cache_clear()

@@ -84,12 +84,16 @@ inside the MCP.
   - **Multi-system workspace (parent source-root).** Pointing `jrag` at a
     *parent directory of nested systems* is supported by both the wizard
     (`jrag install --source-root WorkingProject`) and `init` (`jrag init
-    --source-root WorkingProject`). Detection recognises the layout,
-    prints the systems found, and builds one merged index at
-    `<parent>/.java-codebase-rag/`; the generated `.java-codebase-rag.yml`
-    omits `microservice_roots` (every system is indexed — see
-    [`JRAG-CLI.md`](./JRAG-CLI.md) § Multi-system workspace). For a tree
-    like `WorkingProject/{SystemA/microservice-1, SystemB/microservice-2}`
+    --source-root WorkingProject`), but the two paths differ. The wizard
+    runs `detect_java_layout`, prints the systems found (the "found Java
+    under" banner), and calls `generate_yaml_config` to write
+    `<parent>/.java-codebase-rag.yml` with `microservice_roots` omitted
+    (every system is indexed — see [`JRAG-CLI.md`](./JRAG-CLI.md) §
+    Multi-system workspace); one merged index lands at
+    `<parent>/.java-codebase-rag/`. `init` skips detection entirely — it
+    indexes the parent verbatim, going straight to the pipeline (it writes
+    only the `config_source` pointer, not the YAML). For a tree like
+    `WorkingProject/{SystemA/microservice-1, SystemB/microservice-2}`
     with build markers at the `System*/microservice-*/` level only,
     `microservice_for_path` returns the inner microservice name
     (`microservice-1`) via the outermost-marker fallback, and `module`

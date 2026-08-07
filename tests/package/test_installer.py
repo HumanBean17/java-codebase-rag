@@ -236,6 +236,67 @@ class TestDetectJavaLayout:
         assert result.kind == LAYOUT_MULTI_SYSTEM
         assert set(result.system_dirs) == {"SystemA"}
 
+    def test_detect_layout_multi_system_prunes_build_output_dir(self, tmp_path):
+        """stale target/pom.xml under a real module is pruned via the
+        build-output rule (_is_build_output_dir / prune_walk_dirnames).
+
+        The target/ marker is pruned because its parent microservice-1 holds a
+        build-tool indicator (pom.xml). Routing through prune_walk_dirnames (Fix 2)
+        also exercises the shared helper.
+        """
+        mod = tmp_path / "SystemA" / "microservice-1"
+        mod.mkdir(parents=True)
+        (mod / "pom.xml").write_text("<project></project>")
+        # Stale build-output marker inside microservice-1/target/.
+        (mod / "target").mkdir()
+        (mod / "target" / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_MULTI_SYSTEM,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_MULTI_SYSTEM
+        assert set(result.system_dirs) == {"SystemA"}
+
+    def test_detect_layout_sibling_beats_multi_system_precedence(self, tmp_path):
+        """immediate-child marker (service-a/pom.xml) wins over a deeper
+        marker (SystemB/microservice-2/pom.xml) — sibling-modules precedence."""
+        service_a = tmp_path / "service-a"
+        service_a.mkdir()
+        (service_a / "pom.xml").write_text("<project></project>")
+        sys_b = tmp_path / "SystemB" / "microservice-2"
+        sys_b.mkdir(parents=True)
+        (sys_b / "pom.xml").write_text("<project></project>")
+        from java_codebase_rag.installer import (
+            detect_java_layout,
+            LAYOUT_SIBLING_MODULES,
+        )
+        result = detect_java_layout(tmp_path)
+        assert result.kind == LAYOUT_SIBLING_MODULES
+        assert result.roots == [Path("service-a")]
+        assert result.system_dirs == []
+
+    def test_detect_layout_no_java_exit_2_via_multi_system_descent(
+        self, tmp_path, capsys
+    ):
+        """only a pruned marker (node_modules/evil/pom.xml) → descent runs,
+        prunes node_modules, finds nothing usable, falls through to exit 2.
+
+        Proves the multi-system descent runs (not a false-positive detection),
+        prunes correctly, and reaches the no-Java exit-2 path.
+        """
+        from java_codebase_rag.installer import detect_java_layout
+
+        evil = tmp_path / "node_modules" / "evil"
+        evil.mkdir(parents=True)
+        (evil / "pom.xml").write_text("<project></project>")
+        with pytest.raises(SystemExit) as exc_info:
+            detect_java_layout(tmp_path)
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "No Java build files" in captured.out
+        assert "subtree" in captured.out
+
 
 class TestMultiSystemSummary:
     """Test _multi_system_summary helper."""

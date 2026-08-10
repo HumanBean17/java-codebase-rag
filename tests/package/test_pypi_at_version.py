@@ -127,3 +127,56 @@ def test_unknown_on_bad_json(pypi_mod, monkeypatch, capsys) -> None:
     out, err = capsys.readouterr()
     assert out == ""
     assert "unknown" in err
+
+
+def test_module_imports_without_certifi(monkeypatch) -> None:
+    """certifi is optional: importing the module must NOT fail when certifi is
+    absent. Reproduces the v0.12.1 CI failure where the verify (and, silently,
+    the idempotency) steps crashed with ``ModuleNotFoundError: No module named
+    'certifi'`` because the workflow's bare Python env has no certifi.
+
+    Setting ``sys.modules['certifi'] = None`` makes ``import certifi`` raise
+    ``ImportError``. A hard ``import certifi`` at module top would propagate
+    that out of ``exec_module`` (failing the assert by raising); the try/except
+    falls through to ``_CAFILE = None``.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "certifi", None)
+    spec = importlib.util.spec_from_file_location("pypi_at_version_nocertifi", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # must NOT raise
+    assert mod._CAFILE is None
+
+
+def test_fetch_uses_system_cas_when_certifi_absent(pypi_mod, monkeypatch) -> None:
+    """With certifi absent (``_CAFILE is None``), ``_fetch`` builds an SSL
+    context from the system CA store and still parses PyPI JSON — no crash, no
+    hard dependency. Pins the system-CA fallback path used on CI runners.
+    """
+    class _Resp:
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+    payload = json.dumps({"info": {"version": "0.12.1"}, "releases": {}}).encode()
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, context=None):  # noqa: ANN001 — stub signature mirrors urlopen
+        captured["context"] = context
+        return _Resp(payload)
+
+    monkeypatch.setattr(pypi_mod.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(pypi_mod, "_CAFILE", None)
+
+    data = pypi_mod._fetch("jrag-cli")
+    assert data == {"info": {"version": "0.12.1"}, "releases": {}}
+    assert captured["context"] is not None, "SSL context must be built even without certifi"

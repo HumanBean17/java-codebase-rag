@@ -8,9 +8,10 @@ partial-failure retry converge to "both names at X.Y.Z" instead of erroring on
 PyPI's duplicate-rejection 400 — the sync invariant of the dual-name release.
 
 Consumes the PyPI JSON API at ``https://pypi.org/pypi/<name>/json``. The CA
-bundle is wired in internally from ``certifi`` (the environment's default
-urllib CA chain fails with ``CERTIFICATE_VERIFY_FAILED``), so callers never have
-to set ``SSL_CERT_FILE`` themselves.
+bundle is wired in internally: ``certifi`` when available (the macOS dev box's
+default urllib chain fails with ``CERTIFICATE_VERIFY_FAILED``), otherwise the
+system CA store (CI runners ship no ``certifi`` but a working system chain).
+Callers never set ``SSL_CERT_FILE``, and the helper works in both environments.
 
 Exit codes / output:
     0  stdout ``published``      — name exists AND <version> is already there
@@ -36,7 +37,15 @@ import sys
 import urllib.error
 import urllib.request
 
-import certifi
+try:
+    # certifi is needed only where the system CA chain is broken (e.g. the macOS
+    # dev box); CI runners (Ubuntu) have a working system CA store and the
+    # workflow's bare Python env does not install certifi. Optional, not required.
+    import certifi
+
+    _CAFILE: str | None = certifi.where()
+except ImportError:
+    _CAFILE = None
 
 _PYPI_JSON = "https://pypi.org/pypi/{name}/json"
 
@@ -50,12 +59,15 @@ def _fetch(name: str) -> dict | None:
     ``unknown`` outcome so the workflow can fall through to a real upload.
 
     The CA bundle is supplied two ways, both internally so callers set nothing:
-      - an ``ssl.create_default_context(cafile=certifi.where())`` passed to
-        ``urlopen`` (the primary mechanism), and
-      - ``SSL_CERT_FILE`` set in ``os.environ`` (belt-and-suspenders).
+      - an ``ssl.create_default_context(cafile=...)`` passed to ``urlopen``
+        (``cafile`` is ``certifi.where()`` when certifi is available, else
+        ``None`` which loads the system root certs), and
+      - ``SSL_CERT_FILE`` set in ``os.environ`` when certifi is available
+        (belt-and-suspenders; skipped on CI where the system chain is fine).
     """
-    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
-    ctx = ssl.create_default_context(cafile=certifi.where())
+    if _CAFILE is not None:
+        os.environ.setdefault("SSL_CERT_FILE", _CAFILE)
+    ctx = ssl.create_default_context(cafile=_CAFILE)
 
     url = _PYPI_JSON.format(name=name)
     req = urllib.request.Request(url, headers={"Accept": "application/json"})

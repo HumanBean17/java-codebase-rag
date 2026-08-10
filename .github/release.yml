@@ -1,0 +1,47 @@
+# GitHub release-notes categorization config.
+#
+# Consumed by the `release` workflow's `Create GitHub Release` step via
+# `softprops/action-gh-release@v2` with `generate_release_notes: true`, which
+# calls GitHub's auto-generated release-notes API. The API reads THIS file
+# (`.github/release.yml` at the .github/ root — NOT `.github/workflows/`) to
+# bucket merged PRs into labeled sections.
+#
+# This repo uses Conventional Commit-scoped PR titles/labels (`feat:`,
+# `fix:`, `perf:`, `docs:`, `refactor:`, `chore:`). The categories below map
+# those to human-readable section headings; `chore`-scoped PRs are excluded
+# entirely so version-bump / housekeeping commits don't clutter the notes.
+
+changelog:
+  categories:
+    - title: Features
+      labels:
+        - feat
+        - feature
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: Performance
+      labels:
+        - perf
+        - performance
+    - title: Documentation
+      labels:
+        - docs
+        - documentation
+    - title: Maintenance
+      labels:
+        - refactor
+        - test
+        - tests
+        - ci
+        - build
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"
+  exclude:
+    labels:
+      - chore

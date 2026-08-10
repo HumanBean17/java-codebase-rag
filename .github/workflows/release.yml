@@ -1,0 +1,133 @@
+name: release
+
+# Tag-triggered dual-name PyPI publish + GitHub Release.
+#
+# `scripts/release.sh` (the human half) bumps root + shim pyprojects in
+# lockstep, commits `bump version to X.Y.Z`, and pushes an annotated tag
+# `vX.Y.Z`. This workflow is the CI half: it fires on `v*`, builds the
+# canonical `jrag-cli` dist and the `java-codebase-rag` shim, guards each
+# against its pyproject version, publishes BOTH names to PyPI via OIDC
+# Trusted Publishing (no stored token — the `release` environment is
+# configured as a PyPI Trusted Publisher), verifies both names report the
+# tag's version, and opens a GitHub Release with auto-categorized notes
+# (`.github/release.yml` at the .github/ root — NOT under workflows/).
+#
+# A `workflow_dispatch` run with `dry_run: true` rehearses the build, guard,
+# and idempotency-check steps but SKIPS the two uploads (8, 12), the final
+# verify (13), and the Release (14) — nothing leaves the runner.
+#
+# Publish order is FIXED: jrag-cli first, then the shim. A shim published
+# before the canonical dist would fail to resolve its `jrag-cli==<ver>` dep
+# pin (the dual-name sync invariant).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rehearse build+guard+idempotency without uploading or creating a Release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # softprops/action-gh-release needs to create the Release.
+  id-token: write # OIDC trusted publishing to PyPI (no stored token).
+
+jobs:
+  release:
+    name: publish (jrag-cli + java-codebase-rag)
+    runs-on: ubuntu-latest
+    environment: release # PyPI OIDC Trusted Publisher scope + protection rules.
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      # 1. Checkout (full history not needed; the tag ref is the source of truth).
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Python runtime.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Build tooling.
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      # 4. Read the target version from the checked-out root pyproject.toml
+      #    (single source of truth). Exposed as $VERSION to every later step
+      #    via GITHUB_ENV.
+      - name: Read target version
+        run: |
+          VERSION=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Target version: $VERSION"
+
+      # 5. Build root -> dist/jrag_cli-<ver>.*
+      - name: Build root (jrag-cli)
+        run: python -m build
+
+      # 6. Guard root: dist/ must match pyproject.toml before any upload.
+      - name: Guard root dist
+        run: python scripts/check_dist_version.py --dist dist --pyproject pyproject.toml
+
+      # 7. Idempotency check (root). exit 0 == already published -> skip upload;
+      #    exit 1 (not-published OR unknown/network) -> proceed to upload.
+      #    continue-on-error lets the gate read the outcome rather than fail.
+      - name: Idempotency check (jrag-cli)
+        id: root_check
+        continue-on-error: true
+        run: python scripts/pypi_at_version.py jrag-cli "$VERSION"
+
+      # 8. Publish root. Gated on NOT dry-run AND the check said "not published"
+      #    (outcome == 'failure' == pypi_at_version exited 1).
+      - name: Publish root (jrag-cli)
+        if: ${{ inputs.dry_run != true && steps.root_check.outcome == 'failure' }}
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          packages-dir: dist
+
+      # 9. Build shim -> shim/dist/java_codebase_rag-<ver>.*
+      - name: Build shim (java-codebase-rag)
+        working-directory: shim
+        run: python -m build
+
+      # 10. Guard shim against the shim's own pyproject.toml.
+      - name: Guard shim dist
+        run: python scripts/check_dist_version.py --dist shim/dist --pyproject shim/pyproject.toml
+
+      # 11. Idempotency check (shim).
+      - name: Idempotency check (java-codebase-rag)
+        id: shim_check
+        continue-on-error: true
+        run: python scripts/pypi_at_version.py java-codebase-rag "$VERSION"
+
+      # 12. Publish shim. Order is fixed: AFTER the canonical dist is live, so
+      #     the shim's `jrag-cli==<ver>` dep pin resolves on PyPI.
+      - name: Publish shim (java-codebase-rag)
+        if: ${{ inputs.dry_run != true && steps.shim_check.outcome == 'failure' }}
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          packages-dir: shim/dist
+
+      # 13. Final verify: BOTH names now report $VERSION on PyPI. Fail the job
+      #     if either is missing (the sync invariant: both names at X.Y.Z).
+      #     Skipped in dry-run (nothing was uploaded, so it cannot pass).
+      - name: Verify both names at version
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          python scripts/pypi_at_version.py jrag-cli "$VERSION"
+          python scripts/pypi_at_version.py java-codebase-rag "$VERSION"
+
+      # 14. Create the GitHub Release with auto-categorized notes.
+      - name: Create GitHub Release
+        if: ${{ inputs.dry_run != true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}

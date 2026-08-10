@@ -103,11 +103,22 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    names. `bump_version.py` writes both pyprojects and the shim's `jrag-cli==<ver>`
    pin atomically:
    ```bash
+   .venv/bin/python scripts/bump_version.py --check X.Y.Z    # validate first (no writes)
    .venv/bin/python scripts/bump_version.py --apply X.Y.Z
    ```
-   Validate first with `--check X.Y.Z` (strictly-greater-than math, no writes).
 
-2. **Clean old artifacts** — re-uploading an existing PyPI version is rejected,
+2. **Sync gate (install artifacts)** — the same gate `release.sh` runs before
+   its bump. `bump_version.py` only writes the two pyprojects; it does NOT sync
+   the shipped `install_data` copies to dev source. For a fresh release this
+   MUST pass before building, or the release ships stale agent artifacts:
+   ```bash
+   .venv/bin/python scripts/sync_agent_artifacts.py --check
+   ```
+   If it fails, run `.venv/bin/python scripts/sync_agent_artifacts.py` to sync,
+   commit the changes, then re-check. (Skip only when re-uploading an
+   already-committed release whose source is unchanged.)
+
+4. **Clean old artifacts** — re-uploading an existing PyPI version is rejected,
    and you must never mix stale files into `dist/`. Use `find` for `*.egg-info`,
    **not** a bare glob: under zsh (default `NOMATCH`), `rm -rf dist build *.egg-info`
    with no `.egg-info` match aborts the *whole* command, so `dist/` is never
@@ -117,27 +128,29 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    find . -maxdepth 2 -name '*.egg-info' -exec rm -rf {} +
    ```
 
-3. **Build + guard + upload `jrag-cli` (canonical dist):**
+5. **Build + guard + upload `jrag-cli` (canonical dist):**
    ```bash
    .venv/bin/python -m build
    .venv/bin/python scripts/check_dist_version.py          # reads version from pyproject.toml
    .venv/bin/twine upload dist/*                            # permanent — confirm version first
    ```
 
-4. **Build + guard + upload `java-codebase-rag` (legacy shim).** Build runs
+6. **Build + guard + upload `java-codebase-rag` (legacy shim).** Build runs
    inside `shim/` against `shim/pyproject.toml` — the shim is a metadata-only
    package that depends on `jrag-cli==<ver>`, so its dist files are named
    `java_codebase_rag-<ver>.*` with no name-swap required. Guard the shim
-   against the shim's own pyproject (NOT the root's):
+   against the shim's own pyproject (NOT the root's), and run the guard + upload
+   from repo root. ⚠️ Inside the `cd shim` subshell the repo-root venv is
+   reached via `../.venv/bin/python` (the venv lives at repo root, not `shim/`):
    ```bash
-   ( cd shim && rm -rf dist build && .venv/bin/python -m build )
+   ( cd shim && rm -rf dist build && ../.venv/bin/python -m build )
    .venv/bin/python scripts/check_dist_version.py --dist shim/dist --pyproject shim/pyproject.toml
    .venv/bin/twine upload shim/dist/*                        # permanent — confirm version first
    ```
    Upload the shim AFTER `jrag-cli` is live, so its `jrag-cli==<ver>` dep pin
    resolves on PyPI (same fixed order as CI).
 
-5. **Verify both names on PyPI** via the JSON API. ⚠️ Python's `urllib`/`requests`
+7. **Verify both names on PyPI** via the JSON API. ⚠️ Python's `urllib`/`requests`
    SSL verification fails locally (missing CA bundle) — set `SSL_CERT_FILE`:
    ```bash
    CERT=$(.venv/bin/python -c "import certifi; print(certifi.where())")
@@ -146,7 +159,7 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    ```
    Both must report `X.Y.Z` before the release is considered done.
 
-6. **Commit + push the version bump** (if `release.sh` wasn't used) so the repo
+8. **Commit + push the version bump** (if `release.sh` wasn't used) so the repo
    matches what was published (commit convention: `bump version to X.Y.Z`).
    `dist/`, `build/`, and `*.egg-info` are gitignored — do not commit them.
    If `release.sh` already ran this step, the repo is already at the tag and
@@ -176,7 +189,7 @@ do not ship a release where the two projects disagree.
   `.egg-info` match, zsh's default `NOMATCH` aborts the *whole* command, so
   `dist/`/`build/` survive and stale files ship in the next upload. The `0.10.0`
   release leaked `0.9.7` artifacts this way. Use the `find`-based cleanup in
-  step 2 of the manual fallback — and rely on the `check_dist_version.py` guard
+  step 4 of the manual fallback — and rely on the `check_dist_version.py` guard
   as the backstop regardless.
 - **`import build` succeeds but `python -m build` fails** → `import` resolved to
   a local `build/` namespace dir or stale module, not the PyPA tool. `pip install
@@ -187,7 +200,14 @@ do not ship a release where the two projects disagree.
   before `twine upload`; it exits non-zero if anything in `dist/` doesn't match
   the pyproject version.
 - **Used system `python` / `twine`** → wrong env / missing credentials. Always
-  `.venv/bin/`.
+  `.venv/bin/` (and `../.venv/bin/` from inside `shim/`).
+- **`.venv/bin/python` after `cd shim` → "No such file or directory"** → the
+  venv lives at repo root, so inside `shim/` it is `../.venv/bin/python`, not
+  `.venv/bin/python`. The shim build subshell uses `../.venv/bin/python -m build`;
+  the guard and upload run from repo root with plain `.venv/bin/...`.
+- **Skipped the sync gate** → `bump_version.py` writes only the two pyprojects;
+  it does not sync `install_data`. Run `sync_agent_artifacts.py --check` before
+  building (step 2) or the release ships stale agent artifacts.
 - **Guarded the shim against the root pyproject** → the guard reads the project
   name + version from the pyproject you pass it. For the shim build, point it at
   `shim/pyproject.toml` explicitly (`--dist shim/dist --pyproject shim/pyproject.toml`),

@@ -23,6 +23,7 @@ shape against regression to the stale manual-only procedure.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -126,4 +127,37 @@ def test_retains_dual_publish_policy() -> None:
     assert "jrag-cli" in text and "java-codebase-rag" in text
     assert "same version" in text.lower(), (
         "runbook must state both names report the same version after a release"
+    )
+
+
+def test_shim_build_venv_reachable_after_cd() -> None:
+    """The shim build reaches the repo-root venv from inside ``shim/``.
+
+    Regression guard for a real bug: the shim build was written as
+    ``( cd shim && ... && .venv/bin/python -m build )``. After ``cd shim`` the
+    relative path ``.venv/bin/python`` resolves to ``shim/.venv/bin/python``,
+    which does not exist — so the shim build fails with "No such file or
+    directory", stranding the ``java-codebase-rag`` half of the manual dual
+    publish and breaking the same-version invariant. The fixed form is
+    ``../.venv/bin/python`` (the venv lives at repo root, one level up).
+
+    The guard pins the bug *class*: a ``cd shim`` immediately followed, within
+    the same command/subshell (no closing ``)`` or newline between), by a bare
+    ``.venv/bin/{python,twine,pip}`` that is NOT prefixed with ``../``. The
+    fixed form (``../.venv/bin/python``) fails the negative lookbehind and so
+    does not match.
+    """
+    text = _text()
+    # `cd shim` then, before a `)` or newline, a `.venv/bin/<tool>` NOT preceded
+    # by `../` — i.e. an unreachable venv path from inside shim/.
+    broken = re.compile(
+        r"cd shim\b[^)\n]*?(?<!\.\./)\.venv/bin/(?:python|twine|pip)"
+    )
+    assert not broken.search(text), (
+        "manual fallback invokes a bare `.venv/bin/...` after `cd shim` — after "
+        "the cd that resolves to shim/.venv/bin/... (absent). Use `../.venv/bin/...`."
+    )
+    # Positive pin: the fixed reachable form is actually used for the shim build.
+    assert "../.venv/bin/python -m build" in text, (
+        "shim build must invoke the repo-root venv as `../.venv/bin/python -m build`"
     )

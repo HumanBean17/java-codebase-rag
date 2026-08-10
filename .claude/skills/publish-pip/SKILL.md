@@ -118,7 +118,7 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    commit the changes, then re-check. (Skip only when re-uploading an
    already-committed release whose source is unchanged.)
 
-4. **Clean old artifacts** — re-uploading an existing PyPI version is rejected,
+3. **Clean old artifacts** — re-uploading an existing PyPI version is rejected,
    and you must never mix stale files into `dist/`. Use `find` for `*.egg-info`,
    **not** a bare glob: under zsh (default `NOMATCH`), `rm -rf dist build *.egg-info`
    with no `.egg-info` match aborts the *whole* command, so `dist/` is never
@@ -128,14 +128,14 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    find . -maxdepth 2 -name '*.egg-info' -exec rm -rf {} +
    ```
 
-5. **Build + guard + upload `jrag-cli` (canonical dist):**
+4. **Build + guard + upload `jrag-cli` (canonical dist):**
    ```bash
    .venv/bin/python -m build
    .venv/bin/python scripts/check_dist_version.py          # reads version from pyproject.toml
    .venv/bin/twine upload dist/*                            # permanent — confirm version first
    ```
 
-6. **Build + guard + upload `java-codebase-rag` (legacy shim).** Build runs
+5. **Build + guard + upload `java-codebase-rag` (legacy shim).** Build runs
    inside `shim/` against `shim/pyproject.toml` — the shim is a metadata-only
    package that depends on `jrag-cli==<ver>`, so its dist files are named
    `java_codebase_rag-<ver>.*` with no name-swap required. Guard the shim
@@ -150,7 +150,7 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    Upload the shim AFTER `jrag-cli` is live, so its `jrag-cli==<ver>` dep pin
    resolves on PyPI (same fixed order as CI).
 
-7. **Verify both names on PyPI** via the JSON API. ⚠️ Python's `urllib`/`requests`
+6. **Verify both names on PyPI** via the JSON API. ⚠️ Python's `urllib`/`requests`
    SSL verification fails locally (missing CA bundle) — set `SSL_CERT_FILE`:
    ```bash
    CERT=$(.venv/bin/python -c "import certifi; print(certifi.where())")
@@ -159,7 +159,7 @@ name-swap. The legacy name is rebuilt from `shim/pyproject.toml`.
    ```
    Both must report `X.Y.Z` before the release is considered done.
 
-8. **Commit + push the version bump** (if `release.sh` wasn't used) so the repo
+7. **Commit + push the version bump** (if `release.sh` wasn't used) so the repo
    matches what was published (commit convention: `bump version to X.Y.Z`).
    `dist/`, `build/`, and `*.egg-info` are gitignored — do not commit them.
    If `release.sh` already ran this step, the repo is already at the tag and
@@ -189,7 +189,7 @@ do not ship a release where the two projects disagree.
   `.egg-info` match, zsh's default `NOMATCH` aborts the *whole* command, so
   `dist/`/`build/` survive and stale files ship in the next upload. The `0.10.0`
   release leaked `0.9.7` artifacts this way. Use the `find`-based cleanup in
-  step 4 of the manual fallback — and rely on the `check_dist_version.py` guard
+  step 3 of the manual fallback — and rely on the `check_dist_version.py` guard
   as the backstop regardless.
 - **`import build` succeeds but `python -m build` fails** → `import` resolved to
   a local `build/` namespace dir or stale module, not the PyPA tool. `pip install

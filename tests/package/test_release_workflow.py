@@ -117,6 +117,74 @@ def test_workflow_supports_dry_run_dispatch() -> None:
     )
 
 
+def test_publish_steps_gated_on_push_and_ordered() -> None:
+    """Regression guard for Fixes 1 & 2: publish/Release steps fire ONLY on a
+    real tag push (``github.event_name == 'push'``), and the canonical
+    ``jrag-cli`` publish precedes the ``java-codebase-rag`` shim publish.
+
+    Parses the ordered ``jobs.<job>.steps`` list and asserts:
+      - publish-root ("Publish root (jrag-cli)") precedes publish-shim
+        ("Publish shim (java-codebase-rag)") — fixed root-then-shim order;
+      - publish-root's ``if:`` references ``github.event_name`` (so a
+        ``workflow_dispatch`` cannot publish) AND ``steps.root_check.outcome``
+        (the idempotency gate);
+      - publish-shim's ``if:`` references ``github.event_name`` AND
+        ``steps.shim_check.outcome``;
+      - the create-Release step's ``if:`` references ``github.event_name``.
+    """
+    data = _load(WORKFLOW)
+    jobs = data.get("jobs") or {}
+    assert jobs, "workflow defines no jobs"
+    # Flatten the ordered steps list across jobs (one job here, but stay general).
+    steps: list[dict] = []
+    for job in jobs.values():
+        if isinstance(job, dict):
+            job_steps = job.get("steps") or []
+            if isinstance(job_steps, list):
+                steps.extend(s for s in job_steps if isinstance(s, dict))
+    names = [str(s.get("name", "")) for s in steps]
+
+    def _index(fragment: str) -> int:
+        for i, name in enumerate(names):
+            if fragment in name:
+                return i
+        raise AssertionError(
+            f"no step name containing {fragment!r}; names={names!r}"
+        )
+
+    # (a) fixed root-then-shim publish order.
+    root_idx = _index("Publish root")
+    shim_idx = _index("Publish shim")
+    assert root_idx < shim_idx, (
+        f"publish-root (idx {root_idx}) must precede publish-shim "
+        f"(idx {shim_idx}) in the ordered steps list; names={names!r}"
+    )
+
+    # (b) each publish step gates on event_name AND its idempotency outcome.
+    root_if = str(steps[root_idx].get("if", ""))
+    assert "github.event_name" in root_if, (
+        f"publish-root if: must reference github.event_name: {root_if!r}"
+    )
+    assert "root_check.outcome" in root_if, (
+        f"publish-root if: must reference steps.root_check.outcome: {root_if!r}"
+    )
+
+    shim_if = str(steps[shim_idx].get("if", ""))
+    assert "github.event_name" in shim_if, (
+        f"publish-shim if: must reference github.event_name: {shim_if!r}"
+    )
+    assert "shim_check.outcome" in shim_if, (
+        f"publish-shim if: must reference steps.shim_check.outcome: {shim_if!r}"
+    )
+
+    # (c) create-Release gates on event_name.
+    release_idx = _index("Create GitHub Release")
+    release_if = str(steps[release_idx].get("if", ""))
+    assert "github.event_name" in release_if, (
+        f"create-Release if: must reference github.event_name: {release_if!r}"
+    )
+
+
 def test_notes_config_parses_and_categorizes() -> None:
     """``.github/release.yml`` parses; has categorized sections + a chore exclusion.
 

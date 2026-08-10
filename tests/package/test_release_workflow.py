@@ -235,3 +235,33 @@ def test_notes_config_parses_and_categorizes() -> None:
     assert any("chore" in s for s in suppressions), (
         f"no chore suppression in changelog.exclude: {exclude!r}"
     )
+
+
+def test_publish_action_refs_are_resolvable() -> None:
+    """The PyPA publish action has no bare ``@v1`` ref (tags are ``vX.Y.Z`` only).
+
+    A bare ``@v1`` fails at job setup with "unable to find version v1" (the
+    action's tags are ``v1.0.0``…``v1.14.2``…; the stable moving ref is
+    ``release/v1``). Pin each publish step to a concrete resolvable ref —
+    ``@vX.Y.Z`` or ``@release/v1`` — so the workflow can't ship with a ref
+    GitHub Actions cannot resolve. Guards the v0.12.1 incident.
+    """
+    import re
+
+    data = _load(WORKFLOW)
+    jobs = data.get("jobs") or {}
+    refs = []
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            uses = str(step.get("uses", "")) if isinstance(step, dict) else ""
+            if "gh-action-pypi-publish" in uses:
+                refs.append(uses)
+    assert len(refs) >= 2, f"expected >=2 publish-action uses, found {refs!r}"
+    concrete = re.compile(r"^pypa/gh-action-pypi-publish@(v\d+\.\d+\.\d+|release/v1)$")
+    bad = [r for r in refs if not concrete.match(r)]
+    assert not bad, (
+        f"publish action ref(s) not concretely resolvable — a bare '@v1' does "
+        f"NOT exist on this action: {bad!r}"
+    )

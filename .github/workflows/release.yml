@@ -90,7 +90,7 @@ jobs:
       #    construction regardless of the dry_run input.
       - name: Publish root (jrag-cli)
         if: ${{ github.event_name == 'push' && steps.root_check.outcome == 'failure' }}
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@v1.14.2  # pinned: bare @v1 does not exist on this action
         with:
           packages-dir: dist
 
@@ -114,7 +114,7 @@ jobs:
       #     resolves on PyPI.
       - name: Publish shim (java-codebase-rag)
         if: ${{ github.event_name == 'push' && steps.shim_check.outcome == 'failure' }}
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@v1.14.2  # pinned: bare @v1 does not exist on this action
         with:
           packages-dir: shim/dist
 

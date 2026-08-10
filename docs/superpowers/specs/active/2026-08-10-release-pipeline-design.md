@@ -1,7 +1,7 @@
 # Tag-triggered CI release pipeline (dual PyPI publish + release notes)
 
 - **Date:** 2026-08-10
-- **Status:** draft
+- **Status:** in_progress
 
 ## Motivation
 

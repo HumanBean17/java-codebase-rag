@@ -10,12 +10,30 @@ from __future__ import annotations
 from java_codebase_rag.absence.absence_capability import (
     EDGE_COUNT_KEYS,
     KIND_COUNT_KEYS,
+    clear_capability_cache,
     decompose_edge_types,
+    get_capability_counts,
     kind_node_count,
     requested_types_absent,
     zero_edge_types,
 )
 from java_codebase_rag.absence.absence_types import AbsenceCause
+
+
+class _StubGraph:
+    """Minimal graph stand-in: db_path + canned _rows results for meta reads."""
+
+    def __init__(self, rows: list[dict] | None = None, *, raises: bool = False) -> None:
+        self.db_path = "/tmp/stub_ladybug"
+        self._canned_rows = rows
+        self._raises = raises
+        self.rows_calls = 0
+
+    def _rows(self, query: str, params: dict | None = None) -> list[dict]:
+        self.rows_calls += 1
+        if self._raises:
+            raise RuntimeError("graph unavailable")
+        return self._canned_rows
 
 _STORED_EDGE_LABELS = {
     "EXTENDS", "IMPLEMENTS", "INJECTS", "DECLARES", "OVERRIDES", "CALLS",
@@ -133,3 +151,57 @@ class TestKindNodeCount:
 class TestCauseLiteral:
     def test_capability_absent_in_cause_literal(self) -> None:
         assert "capability_absent" in AbsenceCause.__args__
+
+
+class TestGetCapabilityCounts:
+    """Accessor: light GraphMeta row read, built_at-keyed cache, fail-open."""
+
+    def setup_method(self) -> None:
+        clear_capability_cache()
+
+    def _row(self, cj: str | None, built_at: int) -> list[dict]:
+        row: dict = {"built_at": built_at}
+        if cj is not None:
+            row["cj"] = cj
+        return [row]
+
+    def test_parses_counts_json(self) -> None:
+        g = _StubGraph(self._row('{"calls": 3, "http_calls": 0}', 7))
+        assert get_capability_counts(g) == {"calls": 3, "http_calls": 0}
+
+    def test_cache_hit_same_built_at_returns_same_object(self) -> None:
+        g = _StubGraph(self._row('{"calls": 3, "http_calls": 0}', 7))
+        first = get_capability_counts(g)
+        second = get_capability_counts(g)
+        assert first is second
+        assert g.rows_calls == 2  # the row read always happens; parse is cached
+
+    def test_built_at_change_reparses(self) -> None:
+        rows = self._row('{"calls": 3, "http_calls": 0}', 7)
+        g = _StubGraph(rows)
+        first = get_capability_counts(g)
+        rows[0]["built_at"] = 8
+        rows[0]["cj"] = '{"calls": 4, "http_calls": 1}'
+        second = get_capability_counts(g)
+        assert second == {"calls": 4, "http_calls": 1}
+        assert second is not first
+
+    def test_empty_rows_fails_open(self) -> None:
+        assert get_capability_counts(_StubGraph([])) is None
+
+    def test_missing_counts_json_fails_open(self) -> None:
+        assert get_capability_counts(_StubGraph(self._row(None, 7))) is None
+
+    def test_invalid_json_fails_open(self) -> None:
+        assert get_capability_counts(_StubGraph(self._row("not json{", 7))) is None
+
+    def test_rows_raising_fails_open(self) -> None:
+        assert get_capability_counts(_StubGraph(raises=True)) is None
+
+    def test_clear_cache_forces_reparse(self) -> None:
+        g = _StubGraph(self._row('{"calls": 3, "http_calls": 0}', 7))
+        first = get_capability_counts(g)
+        clear_capability_cache()
+        second = get_capability_counts(g)
+        assert second == first
+        assert second is not first

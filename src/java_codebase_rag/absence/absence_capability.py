@@ -15,6 +15,12 @@ edge label maps to a key present with value 0.
 
 from __future__ import annotations
 
+import json
+import logging
+from typing import Any
+
+log = logging.getLogger(__name__)
+
 __all__ = [
     "EDGE_COUNT_KEYS",
     "KIND_COUNT_KEYS",
@@ -22,6 +28,8 @@ __all__ = [
     "zero_edge_types",
     "requested_types_absent",
     "kind_node_count",
+    "get_capability_counts",
+    "clear_capability_cache",
 ]
 
 # Stored edge label -> counts_json key (build_ast_graph.py:3940 ``counts``).
@@ -120,3 +128,50 @@ def kind_node_count(kind: str | None, counts: dict) -> int | None:
         return int(counts[key])
     except (TypeError, ValueError):
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Counts accessor — light GraphMeta row read with built_at-keyed cache        #
+# --------------------------------------------------------------------------- #
+
+# db_path -> (built_at, counts). The single-row GraphMeta read happens on every
+# call (cheap); the cache avoids re-parsing counts_json per empty-result call.
+# Mirrors the per-process cache pattern of absence_vocab._vocab_cache.
+_counts_cache: dict[str, tuple[int, dict]] = {}
+
+
+def get_capability_counts(graph: Any) -> dict[str, int] | None:
+    """Read build-time counts from the GraphMeta node; None on any failure.
+
+    Fail-open: unreadable meta must never support a capability-absent claim.
+    Failures do not poison the cache.
+    """
+    try:
+        db_path = str(getattr(graph, "db_path", ""))
+        rows = graph._rows(  # noqa: SLF001 - absence-module precedent (absence_diagnosis)
+            "MATCH (m:GraphMeta) RETURN m.counts_json AS cj, m.built_at AS built_at"
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        built_at = int(row.get("built_at") or 0)
+        cached = _counts_cache.get(db_path)
+        if cached is not None and cached[0] == built_at:
+            return cached[1]
+        cj = row.get("cj")
+        if not isinstance(cj, str) or not cj.strip():
+            return None
+        parsed = json.loads(cj)
+        if not isinstance(parsed, dict):
+            return None
+        _counts_cache[db_path] = (built_at, parsed)
+        return parsed
+    except Exception:  # noqa: BLE001 — fail-open, never raise
+        log.debug("capability counts read failed", exc_info=True)
+        return None
+
+
+def clear_capability_cache() -> None:
+    """Test hook: empty the per-process counts cache."""
+    global _counts_cache
+    _counts_cache = {}

@@ -11,6 +11,7 @@ import pytest
 
 from java_codebase_rag.mcp.mcp_v2 import describe_v2, find_v2, neighbors_v2, search_v2
 from java_codebase_rag.analysis.resolve_service import resolve_v2
+from java_codebase_rag.absence.absence_capability import get_capability_counts
 from java_codebase_rag.absence.absence_types import AbsenceVerdict
 
 
@@ -253,3 +254,65 @@ def test_absence_config_singleton_leak_regression_is_clean() -> None:
 
     assert mcp_v2._absence_config is None
     assert resolve_service._absence_config is None
+
+
+# ---- capability_absent: structural empties on a client-less index ------------
+
+
+def test_capability_fixture_is_client_less(ladybug_graph_capability_absent) -> None:
+    """Fixture sanity guard: the index's build-time counts are genuine zeros.
+
+    If this fails, call_graph_smoke grew HTTP clients — swap the fixture
+    directory; do not relax this assert.
+    """
+    counts = get_capability_counts(ladybug_graph_capability_absent)
+    assert counts is not None, "GraphMeta counts unreadable on fixture"
+    assert counts.get("http_calls") == 0
+    assert counts.get("async_calls") == 0
+    assert counts.get("clients") == 0
+    assert counts.get("calls", 0) > 0
+
+
+def test_neighbors_http_calls_structural_absence(ladybug_graph_capability_absent) -> None:
+    """Empty HTTP_CALLS on a zero-http_calls index → capability_absent."""
+    g = ladybug_graph_capability_absent
+    rows = g._rows(  # noqa: SLF001 - mirror existing id acquisition in this file
+        "MATCH (m:Symbol {kind: 'method'}) RETURN m.id AS id LIMIT 1"
+    )
+    assert rows, "fixture should have method symbols"
+    out = neighbors_v2(
+        rows[0]["id"], edge_types=["HTTP_CALLS"], direction="out", graph=g
+    )
+    assert out.success is True
+    assert out.results == []
+    assert out.absence is not None
+    assert out.absence.verdict == "correct_empty"
+    assert out.absence.cause == "capability_absent"
+    assert "don't retry" in out.absence.message
+
+
+def test_neighbors_existing_edge_type_not_structural(ladybug_graph_capability_absent) -> None:
+    """Empty on an edge type with edges index-wide → node-level path, not capability."""
+    g = ladybug_graph_capability_absent
+    # A method with no outbound CALLS (calls > 0 index-wide → not structural).
+    rows = g._rows(  # noqa: SLF001
+        "MATCH (m:Symbol {kind: 'method'}) WHERE NOT (m)-[:CALLS]->() RETURN m.id AS id LIMIT 1"
+    )
+    if not rows:
+        pytest.skip("no leaf methods in fixture")
+    out = neighbors_v2(rows[0]["id"], edge_types=["CALLS"], direction="out", graph=g)
+    assert out.success is True
+    assert out.results == []
+    assert out.absence is not None
+    assert out.absence.cause != "capability_absent"
+
+
+def test_find_client_structural_absence(ladybug_graph_capability_absent) -> None:
+    """find(kind=client) on a zero-clients index → capability_absent."""
+    out = find_v2("client", {}, graph=ladybug_graph_capability_absent)
+    assert out.success is True
+    assert out.results == []
+    assert out.absence is not None
+    assert out.absence.verdict == "correct_empty"
+    assert out.absence.cause == "capability_absent"
+    assert "0 Client nodes" in out.absence.message

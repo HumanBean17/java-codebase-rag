@@ -15,9 +15,10 @@ edge label maps to a key present with value 0.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
+
+from java_codebase_rag.graph.ladybug_queries import _parse_ladybug_json
 
 log = logging.getLogger(__name__)
 
@@ -161,8 +162,10 @@ def get_capability_counts(graph: Any) -> dict[str, int] | None:
         cj = row.get("cj")
         if not isinstance(cj, str) or not cj.strip():
             return None
-        parsed = json.loads(cj)
-        if not isinstance(parsed, dict):
+        # LadybugDB stringifies maps with unquoted keys ({k: v}) — reuse the
+        # graph layer's tolerant parser, never raw json.loads.
+        parsed = _parse_ladybug_json(cj)
+        if not isinstance(parsed, dict) or not parsed:
             return None
         _counts_cache[db_path] = (built_at, parsed)
         return parsed

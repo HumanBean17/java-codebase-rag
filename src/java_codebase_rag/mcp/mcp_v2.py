@@ -1872,6 +1872,7 @@ def neighbors_v2(
                 vocab=vocab,
                 graph=g,
                 cfg=cfg,
+                edge_types=requested_edge_types,
             )
 
         neigh_payload = {

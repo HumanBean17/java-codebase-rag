@@ -253,6 +253,30 @@ def ladybug_graph_fqn_collision_smoke(ladybug_db_path_fqn_collision_smoke: Path)
 
 
 @pytest.fixture(scope="session")
+def ladybug_db_path_capability_absent(tmp_path_factory) -> Path:
+    """Full 6-pass build of ``call_graph_smoke`` — a client-less corpus.
+
+    The capability-absent tests need an index whose client/route/HTTP-call
+    counts are genuine build-time zeros: this fixture is plain call-graph
+    Java with no HTTP clients, async producers, or framework routes.
+    """
+    from _builders import build_ladybug_to
+
+    root = TESTS_DIR / "fixtures" / "call_graph_smoke"
+    assert root.is_dir(), root
+    db_path = _session_db_path(tmp_path_factory, "call_graph_smoke_capabs")
+    return build_ladybug_to(root, db_path, max_pass=6)
+
+
+@pytest.fixture(scope="session")
+def ladybug_graph_capability_absent(ladybug_db_path_capability_absent: Path):
+    """Read-only ``LadybugGraph`` over the client-less index (own DB path)."""
+    from java_codebase_rag.graph.ladybug_queries import LadybugGraph
+
+    return LadybugGraph(str(ladybug_db_path_capability_absent))
+
+
+@pytest.fixture(scope="session")
 def ladybug_db_path_http_caller_smoke(tmp_path_factory) -> Path:
     from _builders import build_ladybug_to
 

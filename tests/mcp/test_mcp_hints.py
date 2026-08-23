@@ -1320,3 +1320,35 @@ def test_hints_or_skip_skips_when_disabled() -> None:
         assert advisories == []
     finally:
         set_hints_enabled(True)  # restore default for other tests
+
+
+# --- Row 4 brownfield-absence advisory: structural replacement (capability-absent) ---
+
+_CLIENT_SUBJECT = {"id": "c:chat-core:feign:0", "client_kind": "feign"}
+
+
+def _advisory_texts(payload: dict[str, Any]) -> list[str]:
+    """generate_hints returns finalized advisories as plain strings."""
+    _, advisories = generate_hints("neighbors", payload)
+    return list(advisories)
+
+
+def test_row4_replaced_when_edge_type_zero_index_wide() -> None:
+    payload = _neighbors_empty_payload(_CLIENT_SUBJECT, ["HTTP_CALLS"])
+    payload["zero_edge_types"] = ["HTTP_CALLS"]
+    texts = _advisory_texts(payload)
+    assert any("index-wide" in t and "structural" in t for t in texts)
+    assert not any("may mean unresolved" in t for t in texts)
+
+
+def test_row4_unchanged_without_zero_key() -> None:
+    payload = _neighbors_empty_payload(_CLIENT_SUBJECT, ["HTTP_CALLS"])
+    texts = _advisory_texts(payload)
+    assert any("may mean unresolved" in t for t in texts)
+
+
+def test_row4_unchanged_when_edge_not_in_zero_set() -> None:
+    payload = _neighbors_empty_payload(_CLIENT_SUBJECT, ["HTTP_CALLS"])
+    payload["zero_edge_types"] = ["ASYNC_CALLS"]
+    texts = _advisory_texts(payload)
+    assert any("may mean unresolved" in t for t in texts)

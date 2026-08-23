@@ -31,6 +31,10 @@ if TYPE_CHECKING:
     # installs ship without torch/lancedb); it is imported lazily in _get_sentence_transformer.
     from sentence_transformers import SentenceTransformer
 
+from java_codebase_rag.absence.absence_capability import (
+    get_capability_counts,
+    zero_edge_types,
+)
 from java_codebase_rag.absence.absence_types import AbsenceDiagnosis
 from java_codebase_rag.absence.absence_diagnosis import diagnose
 from java_codebase_rag.absence.absence_vocab import get_vocabulary_index
@@ -1858,6 +1862,7 @@ def neighbors_v2(
         # Absence diagnosis for empty results
         cfg = _get_absence_config()
         diag: AbsenceDiagnosis | None = None
+        zero_edge_type_list: list[str] = []
         if not sliced:
             # Build root_node from first_origin + subject_record
             root_node = _node_ref_from_row(origin_kind, subject_record) if subject_record else None
@@ -1874,6 +1879,11 @@ def neighbors_v2(
                 cfg=cfg,
                 edge_types=requested_edge_types,
             )
+            # Zero-count edge types for the hints layer (Row 4 structural
+            # replacement). Fail-open: unreadable counts → empty list.
+            counts = get_capability_counts(g)
+            if counts is not None:
+                zero_edge_type_list = sorted(zero_edge_types(counts))
 
         neigh_payload = {
             "success": True,
@@ -1891,6 +1901,7 @@ def neighbors_v2(
             "unfiltered_calls_count": unfiltered_calls_count,
             "unresolved_count": unresolved_count,
             "calls_row_count": calls_row_count,
+            "zero_edge_types": zero_edge_type_list,
         }
         raw_struct, raw_advisories = _hints_or_skip("neighbors", neigh_payload)
         return NeighborsOutput(

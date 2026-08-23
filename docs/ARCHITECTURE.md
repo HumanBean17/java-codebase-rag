@@ -32,7 +32,7 @@ Core library = **top-level `.py` modules** (`py-modules`); the installable **`ja
 | Write path | `java_codebase_rag/cli.py`, `java_codebase_rag/pipeline.py`, `java_codebase_rag/lance_optimize.py`, `java_index_flow_lancedb.py`, `build_ast_graph.py` |
 | Parse + ontology | `ast_java.py` (`ONTOLOGY_VERSION=19`), `java_ontology.py` (`EDGE_SCHEMA` + label sets), `graph_enrich.py`, `chunk_heuristics.py` |
 | Read path | `server.py`, `mcp_v2.py`, `ladybug_queries.py`, `search_lancedb.py`, `search_lexical.py`, `search_scoring.py`, `resolve_service.py`, `java_codebase_rag/read_payloads.py` |
-| Hints + absence | `mcp_hints.py`, `graph_types.py`, `absence_types.py`, `absence_vocab.py`, `absence_diagnosis.py` |
+| Hints + absence | `mcp_hints.py`, `graph_types.py`, `absence_types.py`, `absence_vocab.py`, `absence_diagnosis.py`, `absence_capability.py` |
 | Config + paths | `java_codebase_rag/config.py`, `path_filtering.py`, `index_common.py`, `brownfield_events.py` |
 | Watch daemon | `java_codebase_rag/watch/` (`lock`, `paths`, `protocol`, `warm`, `server`, `client`, `watcher`, `daemon`) |
 | Surfaces | `java_codebase_rag/{cli,jrag,installer}.py` |

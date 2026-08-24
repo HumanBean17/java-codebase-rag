@@ -8,6 +8,7 @@ agent cannot act on): reindex / annotate / @Codebase.
 
 from __future__ import annotations
 
+from java_codebase_rag.absence.absence_capability import clear_capability_cache
 from java_codebase_rag.mcp.server import _INSTRUCTIONS, _build_instructions, create_mcp_server
 
 
@@ -48,6 +49,12 @@ class _StubInstructionsGraph:
 
 
 class TestCreateServerWiring:
+    def setup_method(self) -> None:
+        clear_capability_cache()
+
+    def teardown_method(self) -> None:
+        clear_capability_cache()
+
     def test_instructions_reflect_zero_edge_types(self, monkeypatch) -> None:
         from java_codebase_rag.graph.ladybug_queries import LadybugGraph
 
@@ -65,5 +72,19 @@ class TestCreateServerWiring:
         from java_codebase_rag.graph.ladybug_queries import LadybugGraph
 
         monkeypatch.setattr(LadybugGraph, "exists", classmethod(lambda cls: False))
+        mcp = create_mcp_server()
+        assert mcp.instructions == _INSTRUCTIONS
+
+    def test_instructions_base_when_graph_get_raises(self, monkeypatch) -> None:
+        """Fail-open: the old-ontology RuntimeError from LadybugGraph.get()
+        (or any startup graph failure) degrades to the base text, never
+        crashes server construction."""
+        from java_codebase_rag.graph.ladybug_queries import LadybugGraph
+
+        def _raising_get(cls):
+            raise RuntimeError("graph built with an older ontology")
+
+        monkeypatch.setattr(LadybugGraph, "exists", classmethod(lambda cls: True))
+        monkeypatch.setattr(LadybugGraph, "get", classmethod(_raising_get))
         mcp = create_mcp_server()
         assert mcp.instructions == _INSTRUCTIONS

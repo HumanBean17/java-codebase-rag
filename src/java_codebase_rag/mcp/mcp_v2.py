@@ -1901,8 +1901,12 @@ def neighbors_v2(
             "unfiltered_calls_count": unfiltered_calls_count,
             "unresolved_count": unresolved_count,
             "calls_row_count": calls_row_count,
-            "zero_edge_types": zero_edge_type_list,
         }
+        if not sliced:
+            # Zero-count edge types for the hints layer (Row 4 structural
+            # replacement) — empty-path only; the success path never computes
+            # or carries the key. Fail-open: unreadable counts → empty list.
+            neigh_payload["zero_edge_types"] = zero_edge_type_list
         raw_struct, raw_advisories = _hints_or_skip("neighbors", neigh_payload)
         return NeighborsOutput(
             success=True,

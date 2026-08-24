@@ -149,6 +149,10 @@ def get_capability_counts(graph: Any) -> dict[str, int] | None:
     """
     try:
         db_path = str(getattr(graph, "db_path", ""))
+        if not db_path:
+            # No identity to key the cache on — two db_path-less graphs would
+            # collide. Fail open rather than risk cross-contaminated counts.
+            return None
         rows = graph._rows(  # noqa: SLF001 - absence-module precedent (absence_diagnosis)
             "MATCH (m:GraphMeta) RETURN m.counts_json AS cj, m.built_at AS built_at"
         )

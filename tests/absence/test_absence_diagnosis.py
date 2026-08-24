@@ -652,10 +652,13 @@ class TestCapabilityAbsent:
         assert diag is not None
         assert diag.verdict == "correct_empty"
         assert diag.cause == "capability_absent"
-        assert "0 HTTP_CALLS" in diag.message
+        assert diag.message.startswith("This index contains 0 HTTP_CALLS edges")
         assert "regardless of arguments" in diag.message
         assert "don't retry" in diag.message
-        assert "CALLS" in diag.message  # redirect names a non-zero edge type
+        # Backticked form appears only in the redirect (the subject is bare),
+        # so this pins the redirect element — a bare "CALLS" assert would be
+        # satisfied by the subject "HTTP_CALLS" itself.
+        assert "`CALLS`" in diag.message
         assert "reindex" not in diag.message.lower()
         assert "annotat" not in diag.message.lower()
 
@@ -718,8 +721,10 @@ class TestCapabilityAbsent:
         assert diag is not None
         assert diag.verdict == "correct_empty"
         assert diag.cause == "capability_absent"
-        assert "0 Client nodes" in diag.message
+        assert diag.message.startswith("This index contains 0 Client nodes")
+        assert "nodes nodes" not in diag.message  # noun never duplicated
         assert "don't retry" in diag.message
+        assert "`CALLS`" in diag.message  # redirect element present
 
     def test_find_symbol_never_structural(self, graph, vocab, cfg, monkeypatch):
         _patch_counts(monkeypatch, {"clients": 0, "calls": 5})

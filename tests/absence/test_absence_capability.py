@@ -44,7 +44,12 @@ _STORED_EDGE_LABELS = {
 
 class TestCountKeyMaps:
     def test_edge_count_keys_cover_all_stored_labels(self) -> None:
-        assert set(EDGE_COUNT_KEYS) == _STORED_EDGE_LABELS
+        # Cross-check against the ontology's EDGE_SCHEMA so a future 12th
+        # stored edge type cannot drift in silently (a test-local literal
+        # would keep passing while capability_absent missed the new label).
+        from java_codebase_rag.graph.java_ontology import EDGE_SCHEMA
+
+        assert set(EDGE_COUNT_KEYS) == set(EDGE_SCHEMA) == _STORED_EDGE_LABELS
 
     def test_edge_count_keys_values_are_lowercase_counts_keys(self) -> None:
         for label, key in EDGE_COUNT_KEYS.items():
@@ -159,6 +164,10 @@ class TestGetCapabilityCounts:
     def setup_method(self) -> None:
         clear_capability_cache()
 
+    def teardown_method(self) -> None:
+        # Don't leak stub-db_path entries to other test files.
+        clear_capability_cache()
+
     def _row(self, cj: str | None, built_at: int) -> list[dict]:
         row: dict = {"built_at": built_at}
         if cj is not None:
@@ -197,6 +206,11 @@ class TestGetCapabilityCounts:
 
     def test_rows_raising_fails_open(self) -> None:
         assert get_capability_counts(_StubGraph(raises=True)) is None
+
+    def test_missing_db_path_fails_open(self) -> None:
+        g = _StubGraph(self._row('{"calls": 1}', 1))
+        del g.db_path
+        assert get_capability_counts(g) is None
 
     def test_clear_cache_forces_reparse(self) -> None:
         g = _StubGraph(self._row('{"calls": 3, "http_calls": 0}', 7))

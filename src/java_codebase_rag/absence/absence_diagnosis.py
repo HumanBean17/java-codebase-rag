@@ -1,8 +1,10 @@
 """Stateless absence diagnosis (PR-ABS-2) — the feature's core.
 
 ``diagnose(...)`` is the single place empty-MCP-result logic lives. It classifies
-an empty exploration result by cause and emits cause-specific help. Pure function
-of its inputs (incl. the :class:`VocabularyIndex`); no I/O, no mutation. Consumed
+an empty exploration result by cause and emits cause-specific help. Deterministic
+given its inputs and the (read-only) graph/vocab queries it issues for evidence —
+did-you-mean, filter tallies, meaningful-empty probes, and the build-time counts
+read for ``capability_absent``; no mutation, no writes. Consumed
 by PR-ABS-3 (MCP wiring) and PR-ABS-4 (CLI).
 
 Similarity metric
@@ -644,11 +646,13 @@ def _redirect_labels(counts: dict) -> list[str]:
 def _capability_message(subject: str, redirect_labels: list[str]) -> str:
     """Fact + expectation + redirect, in that order (spec D6).
 
-    No annotation/reindex coaching — the agent cannot act on operator
-    remedies; it can only query right and expect right.
+    ``subject`` for neighbors is bare edge labels (noun appended here);
+    for find it already carries its noun ("Client nodes") — never append
+    twice. No annotation/reindex coaching — the agent cannot act on
+    operator remedies; it can only query right and expect right.
     """
-    noun = "nodes" if subject.endswith("nodes") else "edges"
-    head = f"This index contains 0 {subject} {noun} —"
+    noun = "" if subject.endswith(("nodes", "edges")) else " edges"
+    head = f"This index contains 0 {subject}{noun} —"
     mid = (
         f" any query on {subject} returns empty regardless of arguments — "
         "don't retry it."

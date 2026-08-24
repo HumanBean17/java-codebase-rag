@@ -661,13 +661,20 @@ def generate_hints(
                         requested_direction=requested_direction,
                     )
                 )
-                # Brownfield absence advisory (Row 4)
+                # Brownfield absence advisory (Row 4). When the edge type has
+                # zero edges index-wide (capability-absent), the "may mean
+                # unresolved" framing is wrong — the empty is structural, so
+                # say so instead of encouraging further digging.
                 subject_label = _subject_node_label(subject_record)
                 if subject_label in _BROWNFIELD_ABSENCE_SUBJECT_LABELS:
+                    zero_types = {str(z) for z in (payload.get("zero_edge_types") or [])}
                     for edge in edge_labels:
                         spec = EDGE_SCHEMA.get(edge)
                         if spec is not None and spec.brownfield_resolver_sourced:
-                            advisories.append((PRIORITY_META, f"edges on '{edge}' are emitted by the brownfield resolver — absence here may mean unresolved (no matching annotation/target), not absent from the codebase"))
+                            if edge in zero_types:
+                                advisories.append((PRIORITY_META, f"edges on '{edge}' number 0 index-wide — this empty is structural, not a query problem; don't retry"))
+                            else:
+                                advisories.append((PRIORITY_META, f"edges on '{edge}' are emitted by the brownfield resolver — absence here may mean unresolved (no matching annotation/target), not absent from the codebase"))
                             break
         elif results and offset == 0:
             struct_success.extend(_neighbors_success_structured_hints(payload))

@@ -613,3 +613,142 @@ class TestRobustness:
         )
         # Must not raise; returns a minimal refine_query (or None).
         assert diag is None or diag.verdict == "refine_query"
+
+
+# ---- capability_absent: structural empty detection (spec: capability-absent) --
+
+
+def _patch_counts(monkeypatch, counts: dict | None) -> None:
+    """Patch the accessor imported into absence_diagnosis's namespace."""
+    monkeypatch.setattr(
+        "java_codebase_rag.absence.absence_diagnosis.get_capability_counts",
+        lambda g: counts,
+    )
+
+
+def _method_node() -> NodeRef:
+    return NodeRef(
+        id="sym:com.example.ChatService#handle",
+        kind="symbol",
+        fqn="com.example.ChatService#handle",
+        name="handle",
+        symbol_kind="method",
+    )
+
+
+class TestCapabilityAbsent:
+    """neighbors/find on a zero-count edge type or node kind → structural empty."""
+
+    def test_neighbors_structural(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, {"http_calls": 0, "calls": 812})
+        diag = _diagnose(
+            tool="neighbors",
+            root_node=_method_node(),
+            edge_types=["HTTP_CALLS"],
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.verdict == "correct_empty"
+        assert diag.cause == "capability_absent"
+        assert diag.message.startswith("This index contains 0 HTTP_CALLS edges")
+        assert "regardless of arguments" in diag.message
+        assert "don't retry" in diag.message
+        # Backticked form appears only in the redirect (the subject is bare),
+        # so this pins the redirect element — a bare "CALLS" assert would be
+        # satisfied by the subject "HTTP_CALLS" itself.
+        assert "`CALLS`" in diag.message
+        assert "reindex" not in diag.message.lower()
+        assert "annotat" not in diag.message.lower()
+
+    def test_neighbors_mixed_list_not_structural(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, {"http_calls": 0, "calls": 812})
+        diag = _diagnose(
+            tool="neighbors",
+            root_node=_method_node(),
+            edge_types=["HTTP_CALLS", "CALLS"],
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.cause != "capability_absent"
+
+    def test_counts_none_fails_open(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, None)
+        diag = _diagnose(
+            tool="neighbors",
+            root_node=_method_node(),
+            edge_types=["HTTP_CALLS"],
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.cause != "capability_absent"
+
+    def test_external_wins_over_capability(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(
+            monkeypatch,
+            {k: 0 for k in ("http_calls", "calls", "declares", "extends")},
+        )
+        diag = _diagnose(
+            tool="neighbors",
+            root_node=NodeRef(
+                id="ucs:com.example.ChatService#handle:0",
+                kind="unresolved_call_site",
+                fqn="com.example.SomeMissing#call",
+            ),
+            edge_types=["HTTP_CALLS"],
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.verdict == "external_dependency"
+
+    def test_find_structural(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, {"clients": 0, "calls": 5})
+        diag = _diagnose(
+            tool="find",
+            filt={"target_path_contains": "x"},
+            filter_kind="client",
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.verdict == "correct_empty"
+        assert diag.cause == "capability_absent"
+        assert diag.message.startswith("This index contains 0 Client nodes")
+        assert "nodes nodes" not in diag.message  # noun never duplicated
+        assert "don't retry" in diag.message
+        assert "`CALLS`" in diag.message  # redirect element present
+
+    def test_find_symbol_never_structural(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, {"clients": 0, "calls": 5})
+        diag = _diagnose(
+            tool="find",
+            filt={"fqn_contains": "ChatService"},
+            filter_kind="symbol",
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.cause != "capability_absent"
+
+    def test_composed_key_decomposes(self, graph, vocab, cfg, monkeypatch):
+        _patch_counts(monkeypatch, {"declares_client": 0, "calls": 3})
+        diag = _diagnose(
+            tool="neighbors",
+            root_node=_method_node(),
+            edge_types=["DECLARES.DECLARES_CLIENT"],
+            vocab=vocab,
+            graph=graph,
+            cfg=cfg,
+        )
+        assert diag is not None
+        assert diag.cause == "capability_absent"
+        assert "DECLARES_CLIENT" in diag.message

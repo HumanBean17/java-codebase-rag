@@ -24,7 +24,7 @@ __all__ = [
 
 # Literal types for verdicts and causes
 AbsenceVerdict = Literal["refine_query", "not_in_project", "external_dependency", "correct_empty"]
-AbsenceCause = Literal["identifier_miss", "nl_miss", "filter_miss", "external", "meaningful_empty"]
+AbsenceCause = Literal["identifier_miss", "nl_miss", "filter_miss", "external", "meaningful_empty", "capability_absent"]
 ExternalReason = Literal["prefix", "phantom", "unresolved-call"]
 
 

@@ -1,8 +1,10 @@
 """Stateless absence diagnosis (PR-ABS-2) — the feature's core.
 
 ``diagnose(...)`` is the single place empty-MCP-result logic lives. It classifies
-an empty exploration result by cause and emits cause-specific help. Pure function
-of its inputs (incl. the :class:`VocabularyIndex`); no I/O, no mutation. Consumed
+an empty exploration result by cause and emits cause-specific help. Deterministic
+given its inputs and the (read-only) graph/vocab queries it issues for evidence —
+did-you-mean, filter tallies, meaningful-empty probes, and the build-time counts
+read for ``capability_absent``; no mutation, no writes. Consumed
 by PR-ABS-3 (MCP wiring) and PR-ABS-4 (CLI).
 
 Similarity metric
@@ -37,6 +39,13 @@ from java_codebase_rag.absence.absence_types import (
     FilterRelaxation,
     FilterRelaxationDim,
     VocabularyContext,
+)
+from java_codebase_rag.absence.absence_capability import (
+    EDGE_COUNT_KEYS,
+    decompose_edge_types,
+    get_capability_counts,
+    kind_node_count,
+    requested_types_absent,
 )
 from java_codebase_rag.absence.absence_vocab import SymbolRecord, VocabularyIndex, _normalize_name
 from java_codebase_rag.graph.graph_types import NodeRef
@@ -81,6 +90,7 @@ def diagnose(
     vocab: VocabularyIndex,
     graph: Any,                        # LadybugGraph
     cfg: Any,                          # ResolvedOperatorConfig (thresholds)
+    edge_types: list[str] | None = None,  # neighbors' requested edge types
 ) -> AbsenceDiagnosis | None:
     """Classify an empty result and emit cause-specific help.
 
@@ -101,6 +111,7 @@ def diagnose(
             vocab=vocab,
             graph=graph,
             cfg=cfg,
+            edge_types=edge_types,
         )
     except Exception:  # noqa: BLE001 — diagnosis must never fail the tool
         log.exception("absence diagnosis failed; degrading to refine_query")
@@ -123,6 +134,7 @@ def _diagnose_inner(
     vocab: VocabularyIndex,
     graph: Any,
     cfg: Any,
+    edge_types: list[str] | None = None,
 ) -> AbsenceDiagnosis | None:
     # --- External-wins: emit external_dependency first for any external target.
     ext = _detect_external(query, filt, filter_kind, root_node, vocab)
@@ -136,6 +148,36 @@ def _diagnose_inner(
             ),
             external_identity=ext,
         )
+
+    # --- Capability check (structural empty): the requested edge type / node
+    # --- kind has zero instances index-wide — no query can ever succeed.
+    # Precedence: after external (a valid external subject wins), before the
+    # node-level branches (if the edge type can't exist, node shape is moot).
+    # Fail-open: counts unreadable → skip, existing behavior (never false-absent).
+    counts = get_capability_counts(graph)
+    if counts is not None:
+        if (
+            tool == "neighbors"
+            and edge_types
+            and requested_types_absent(edge_types, counts)
+        ):
+            absent_labels = decompose_edge_types(edge_types)
+            return AbsenceDiagnosis(
+                verdict="correct_empty",
+                cause="capability_absent",
+                message=_capability_message(
+                    " / ".join(absent_labels), _redirect_labels(counts)
+                ),
+            )
+        if tool == "find" and filter_kind and kind_node_count(filter_kind, counts) == 0:
+            return AbsenceDiagnosis(
+                verdict="correct_empty",
+                cause="capability_absent",
+                message=_capability_message(
+                    f"{filter_kind.strip().capitalize()} nodes",
+                    _redirect_labels(counts),
+                ),
+            )
 
     # --- neighbors/describe subject present.
     if root_node is not None:
@@ -576,6 +618,54 @@ def _build_vocabulary_context(graph: Any, vocab: VocabularyIndex) -> VocabularyC
         roles_present=[(k, int(v)) for k, v in roles],
         frequent_name_tokens=tokens,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Capability-absent message construction                                      #
+# --------------------------------------------------------------------------- #
+
+# Fixed preference order for redirect suggestions (spec D6): pick the first
+# non-zero of these, up to three. Falls back to find/search when none qualify.
+_REDIRECT_PREFERENCE: tuple[str, ...] = ("CALLS", "EXPOSES", "DECLARES", "INJECTS")
+
+
+def _redirect_labels(counts: dict) -> list[str]:
+    """Non-zero edge labels from the preference order, capped at 3."""
+    out: list[str] = []
+    for label in _REDIRECT_PREFERENCE:
+        try:
+            if int(counts.get(EDGE_COUNT_KEYS[label], -1)) > 0:
+                out.append(label)
+        except (TypeError, ValueError):
+            continue
+        if len(out) == 3:
+            break
+    return out
+
+
+def _capability_message(subject: str, redirect_labels: list[str]) -> str:
+    """Fact + expectation + redirect, in that order (spec D6).
+
+    ``subject`` for neighbors is bare edge labels (noun appended here);
+    for find it already carries its noun ("Client nodes") — never append
+    twice. No annotation/reindex coaching — the agent cannot act on
+    operator remedies; it can only query right and expect right.
+    """
+    noun = "" if subject.endswith(("nodes", "edges")) else " edges"
+    head = f"This index contains 0 {subject}{noun} —"
+    mid = (
+        f" any query on {subject} returns empty regardless of arguments — "
+        "don't retry it."
+    )
+    if redirect_labels:
+        named = ", ".join(f"`{label}`" for label in redirect_labels)
+        tail = (
+            f" For what you need, use the edge types this index does have "
+            f"(e.g. {named})."
+        )
+    else:
+        tail = " For symbol discovery use `find`/`search` instead."
+    return head + mid + tail
 
 
 # --------------------------------------------------------------------------- #

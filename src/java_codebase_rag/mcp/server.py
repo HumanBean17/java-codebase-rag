@@ -30,6 +30,10 @@ from java_codebase_rag.config import (
     resolved_sbert_model_for_process_env,
     resolve_operator_config,
 )
+from java_codebase_rag.absence.absence_capability import (
+    get_capability_counts,
+    zero_edge_types,
+)
 from java_codebase_rag.graph.ladybug_queries import LadybugGraph, resolve_ladybug_path
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -55,6 +59,36 @@ _INSTRUCTIONS = (
     "type Symbols may also use composed neighbors edge_types DECLARES.DECLARES_CLIENT, DECLARES.DECLARES_PRODUCER, DECLARES.EXPOSES (out only, type Symbol origin). "
     "Reprocess/init, meta, tables, diagnose-ignore, analyze-pr: use jrag CLI — not MCP."
 )
+
+
+def _build_instructions(zero_types: list[str] | None) -> str:
+    """Server instructions plus a zero-edge-type note when applicable.
+
+    ``zero_types`` is the sorted list of stored edge labels with zero edges
+    index-wide (capability-absent). Empty/None → byte-identical base text.
+    Purely expectation-setting for the agent — no operator remedies.
+    """
+    if not zero_types:
+        return _INSTRUCTIONS
+    named = ", ".join(f"`{label}`" for label in zero_types)
+    return (
+        _INSTRUCTIONS
+        + f" Zero-edge types in this index (always return empty — don't query): {named}."
+    )
+
+
+def _startup_zero_edge_types() -> list[str]:
+    """Resolve the zero-edge-type list from the current graph, fail-open."""
+    try:
+        if not LadybugGraph.exists():
+            return []
+        graph = LadybugGraph.get()
+        counts = get_capability_counts(graph)
+        if counts is None:
+            return []
+        return sorted(zero_edge_types(counts))
+    except Exception:  # noqa: BLE001 — instructions must never fail startup
+        return []
 
 
 class GraphMetaOutput(BaseModel):
@@ -607,7 +641,10 @@ async def run_refresh_pipeline(
 
 
 def create_mcp_server() -> FastMCP:
-    mcp = FastMCP("java-codebase-rag", instructions=_INSTRUCTIONS)
+    mcp = FastMCP(
+        "java-codebase-rag",
+        instructions=_build_instructions(_startup_zero_edge_types()),
+    )
 
     @mcp.tool(
         name="search",

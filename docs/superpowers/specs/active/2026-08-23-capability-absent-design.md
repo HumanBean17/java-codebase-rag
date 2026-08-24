@@ -1,7 +1,7 @@
 # Capability-absent: structural empty-result signaling for edge navigation
 
 - **Date:** 2026-08-23
-- **Status:** in_progress
+- **Status:** implemented
 
 ## Motivation
 

@@ -23,6 +23,7 @@ Two test populations:
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -111,6 +112,23 @@ def _wait_alive(index_dir: Path, timeout: float) -> bool:
             return True
         time.sleep(0.1)
     return False
+
+
+def _wait_state(index_dir: Path, timeout: float = _STUB_READY_S) -> dict:
+    """Poll until the daemon's initial state file exists and parses; return it.
+
+    ``is_daemon_alive`` turns true at socket bind, which PRECEDES the initial
+    state write (``run_foreground`` binds, starts the watcher, then writes the
+    state file), so reading the state right after alive races daemon startup on
+    a loaded runner — poll for the file instead of assuming alive ⇒ written.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            return json.loads(paths.state_path(index_dir).read_text())
+        except (OSError, ValueError):  # not yet written / torn write — keep polling
+            time.sleep(0.1)
+    pytest.fail(f"daemon state file not written within {timeout}s")
 
 
 def _wait_dead(proc: subprocess.Popen, timeout: float = _SHUTDOWN_WAIT_S) -> int:
@@ -444,6 +462,9 @@ def test_sigint_clean_shutdown(tmp_path, daemon_stub):
     proc = _spawn_stub(daemon_stub, index_dir, source_root)
     try:
         assert _wait_alive(index_dir, _STUB_READY_S), "stub daemon did not come up"
+        # Socket + pid files exist by definition of alive; the state file is
+        # written only after the watcher starts, so wait for it explicitly.
+        _wait_state(index_dir)
         sock = paths.socket_path(index_dir)
         pid_file = paths.pid_path(index_dir)
         state_file = paths.state_path(index_dir)
@@ -471,9 +492,7 @@ def test_state_file_written_on_start(tmp_path, daemon_stub):
     proc = _spawn_stub(daemon_stub, index_dir, source_root)
     try:
         assert _wait_alive(index_dir, _STUB_READY_S)
-        import json
-
-        state = json.loads(paths.state_path(index_dir).read_text())
+        state = _wait_state(index_dir)
         assert state["pid"] == proc.pid
         assert state["socket"] == str(paths.socket_path(index_dir))
         assert state["started_at"] is not None
@@ -579,9 +598,7 @@ def test_foreground_graph_only_starts_without_vectors(tmp_path, monkeypatch):
         if not came_up:
             _fail_with_log(log_path, f"graph-only daemon did not come up in {_STUB_READY_S}s")
 
-        import json
-
-        state = json.loads(paths.state_path(index_dir).read_text())
+        state = _wait_state(index_dir)
         assert state.get("mode") == "lexical", f"expected mode='lexical', got {state.get('mode')!r}"
         assert state["pid"] == proc.pid
     finally:

@@ -100,7 +100,7 @@ def test_prime_prints_payload_on_indexed_repo(
 
 
 def test_prime_silent_without_index(tmp_path: Path) -> None:
-    """No index -> empty stdout and rc 0 (never nags an unindexed repo)."""
+    """No index -> empty stdout AND stderr, rc 0 (never nags an unindexed repo)."""
     env = os.environ.copy()
     env["JAVA_CODEBASE_RAG_SOURCE_ROOT"] = str(tmp_path)
     env["JAVA_CODEBASE_RAG_INDEX_DIR"] = str(tmp_path / "no-index-here")
@@ -109,6 +109,81 @@ def test_prime_silent_without_index(tmp_path: Path) -> None:
         f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
     )
     assert proc.stdout == "", f"expected silent stdout, got: {proc.stdout!r}"
+    assert proc.stderr == "", f"expected silent stderr, got: {proc.stderr!r}"
+
+
+# ----- Test 2b: the generic degradation branch -----
+
+
+def test_prime_degrades_on_internal_error(tmp_path: Path, monkeypatch, capsys) -> None:
+    """An unexpected failure -> empty stdout, exactly one stderr line, rc 0.
+
+    This is the branch a corrupt index or a render bug takes. It must be
+    handled inside the handler: reaching ``main``'s trap instead would print an
+    error envelope to stdout plus a traceback and exit 2, which a SessionStart
+    hook surfaces as a session-start error in every session of every repo.
+    """
+    from java_codebase_rag import jrag as jrag_mod
+
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", str(tmp_path))
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_INDEX_DIR", str(tmp_path / "no-index"))
+
+    def _boom(cfg):
+        raise RuntimeError("simulated unreadable index")
+
+    monkeypatch.setattr(jrag_mod, "_load_graph", _boom)
+    # ``_resolve_cfg`` -> ``apply_to_os_environ`` writes process env without
+    # monkeypatch's knowledge; restore it so later tests in this process are
+    # unaffected by SBERT_MODEL & friends.
+    env_snapshot = dict(os.environ)
+    try:
+        rc = jrag_mod._cmd_prime(jrag_mod.build_parser().parse_args(["prime"]))
+    finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.out == "", f"expected empty stdout, got: {captured.out!r}"
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1, f"expected exactly one stderr line, got: {captured.err!r}"
+    assert "RuntimeError" in lines[0] and "simulated unreadable index" in lines[0]
+    assert "Traceback" not in captured.err
+
+
+def test_prime_render_failure_stays_hook_safe(
+    corpus_root: Path, ladybug_db_path: Path, monkeypatch, capsys
+) -> None:
+    """A failure at render time degrades too — it must not escape the handler.
+
+    Pins the ``print`` living inside the ``try``: before that, a render bug
+    propagated to ``main``'s trap, which answers with an error envelope on
+    stdout, a traceback on stderr, and rc 2 — noise a SessionStart hook would
+    raise as a session-start error. ``render`` is resolved at call time inside
+    the handler, so patching the module attribute is the seam.
+    """
+    from java_codebase_rag import jrag as jrag_mod
+    from java_codebase_rag import prime as prime_mod
+
+    def _boom(state):
+        raise ValueError("simulated template regression")
+
+    monkeypatch.setattr(prime_mod, "render", _boom)
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", str(corpus_root))
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_INDEX_DIR", str(ladybug_db_path.parent))
+    env_snapshot = dict(os.environ)
+    try:
+        rc = jrag_mod._cmd_prime(jrag_mod.build_parser().parse_args(["prime"]))
+    finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.out == "", f"expected empty stdout, got: {captured.out!r}"
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(lines) == 1, f"expected exactly one stderr line, got: {captured.err!r}"
+    assert "ValueError" in lines[0] and "simulated template regression" in lines[0]
 
 
 # ----- Test 3: --hook-json envelope -----

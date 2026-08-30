@@ -26,12 +26,14 @@ from pathlib import Path
 import yaml
 
 # jrag CLI agent verbs the benchmark exposes (Plan 4). This is the full agent
-# verb surface from ``cli_dispatch.AGENT_VERBS`` MINUS the maintenance/daemon
-# verbs ``watch`` (long-lived daemon — would hang a cell) and ``vocab-index``
-# (index mutation). Keep in sync with ``src/java_codebase_rag/jrag.py``; a stale
-# entry over-restricts condition D (graceful — the agent just can't use a new
-# verb) and never leaks a verb into B (B's allow-list is the literal
-# ``["search"]``).
+# verb surface from ``cli_dispatch.AGENT_VERBS`` MINUS the non-query verbs:
+# ``watch`` (long-lived daemon — would hang a cell), ``vocab-index`` (index
+# mutation), and ``prime`` (not a query — the harness itself generates
+# condition D's priming payload from ``jrag prime`` at compose time, so the
+# agent under test never invokes it; jrag-prime plan, Task 3). Keep in sync
+# with ``src/java_codebase_rag/jrag.py``; a stale entry over-restricts
+# condition D (graceful — the agent just can't use a new verb) and never leaks
+# a verb into B (B's allow-list is the literal ``["search"]``).
 JRAG_QUERY_VERBS = [
     # orientation
     "status", "microservices", "map", "conventions", "overview",

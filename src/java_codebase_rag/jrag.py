@@ -1843,11 +1843,14 @@ def _cmd_prime(args: argparse.Namespace) -> int:
             # here it is the stderr-line degradation instead.
             raise RuntimeError(f"index meta read failed: {meta['error']}")
         state = _prime_state(cfg, graph, meta)
+        # Inside the try on purpose: a render failure must take the degradation
+        # path, not escape to ``main``'s handler trap (error envelope on stdout
+        # + traceback + rc 2). ``render`` is evaluated before ``print`` writes a
+        # byte, so a failure here still leaves stdout empty.
+        print(render_hook_json(state) if args.hook_json else render(state))
     except Exception as exc:  # noqa: BLE001 - hook-safe degradation
         print(f"jrag prime: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 0
-
-    print(render_hook_json(state) if args.hook_json else render(state))
     return 0
 
 

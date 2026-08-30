@@ -51,22 +51,95 @@ payload in `additionalContext`; qwen-code consumes the same shape).
 
 Payload contract — navigation framing, four parts:
 
-1. **Identity.** `jrag` is a prebuilt structural map of this Java/Kotlin repo,
-   queried from the shell: resolve a name to its file, walk who-calls-whom and
-   dependency edges, see entry points and service boundaries — instead of
-   grepping for structure.
-2. **Ability catalog.** The command verbs, one line each, grouped by intent
-   (Locate / Traverse / Compose / Entries / Orient), plus a standalone line:
-   `jrag --help` lists every command; `jrag <command> --help` lists flags and
-   enum values.
+1. **Identity.** `jrag` is a map, not an oracle — a CLI over a prebuilt
+   structural index of this Java/Kotlin repo that resolves names to files,
+   walks who-calls-whom and dependency edges, and surfaces entry points and
+   service boundaries. Closing line of the identity paragraph: "You are the
+   explorer; jrag is the map."
+2. **Command surface — embedded from the real `--help` output.** Two blocks,
+   verbatim from `jrag --help`: the `Commands by group` block (with `routes,
+   clients` normalized to the real command names `http-routes`, `http-clients`)
+   and the per-command one-line reference. Excluded: the argparse usage dump,
+   the `{...}` positional dump, the options block, and the operator-commands
+   epilogue (`init`, `install`, `update`, `reprocess`, `erase`, `meta`,
+   `tables`, `diagnose-ignore`). Embedding the real help keeps the payload
+   from drifting as the surface evolves; the descriptions are capability
+   information an agent needs to one-shot the right verb. Standalone closing
+   line: run `jrag <command> --help` for flags.
 3. **One trust rule.** If jrag and the files disagree, trust the files — the
-   map may lag the working tree.
+   index may lag the working tree.
 4. **Live state.** Freshness (fresh / stale with changed-file count, last
    increment age), service count and names (truncated), symbol/route/client/
    producer counts, watch daemon running or not.
 
 Parts 1–3 are a static template (module constant in the source tree, not
-`install_data`); part 4 is computed.
+`install_data`), with the embedded help blocks regenerated in lockstep with
+the help text; part 4 is computed.
+
+Canonical template (selected from five parallel candidate drafts; `{…}` are
+computed slots):
+
+```markdown
+`jrag` is a CLI over a prebuilt structural index of this Java/Kotlin repo — a map, not an oracle.
+It resolves names to files, walks who-calls-whom and dependency edges, and surfaces entry points
+and service boundaries — structure you'd otherwise grep for. You are the explorer; jrag is the map.
+
+**Trust rule:** if jrag and the files disagree, trust the files — the index may lag the working tree.
+
+**Index state**
+
+- Index {freshness} (incremented {age} ago) · watch daemon {running|not running}
+- {n} services ({names, truncated}) · {n} symbols
+- {n} routes · {n} clients · {n} producers
+
+**Commands by group** (from `jrag --help`)
+
+    health:      status
+    locate:      find, inspect
+    listings:    http-routes, http-clients, producers, topics, jobs, listeners, entities
+    traversal:   callers, callees, hierarchy, implementations, subclasses,
+                 overrides, overridden-by, dependents, impact, decompose,
+                 flow, dependencies, connection, outline, imports
+    orientation: microservices, map, conventions, overview
+    search:      search
+
+**Command reference**
+
+- `status` — Print index freshness, ontology version, and counts.
+- `find` — Find nodes by query or filter.
+- `inspect` — Inspect a node by query.
+- `http-routes` — List HTTP routes.
+- `http-clients` — List HTTP clients.
+- `producers` — List async message producers.
+- `topics` — List message topics (producer-grouped).
+- `jobs` — List scheduled tasks.
+- `listeners` — List message listeners.
+- `entities` — List JPA entities.
+- `callers` — Who calls this symbol or route?
+- `callees` — What does this symbol call?
+- `hierarchy` — Type hierarchy (parents and children).
+- `implementations` — Classes implementing an interface.
+- `subclasses` — Classes extending a type.
+- `overrides` — Methods this method overrides (dispatch UP to declaration).
+- `overridden-by` — Methods overriding this one (dispatch DOWN to overriders).
+- `dependents` — Who injects this type?
+- `impact` — Fleet-wide blast radius (INJECTS/IMPLEMENTS/EXTENDS reverse closure).
+- `decompose` — Role-waterfall flow from an entrypoint.
+- `flow` — Request flow through a route (inbound callers + outbound CALLS hops).
+- `dependencies` — Types this Symbol injects (INJECTS out).
+- `connection` — Cross-service connections for a microservice (inbound/outbound).
+- `outline` — List symbols declared in a file.
+- `imports` — List imports declared in a file (tree-sitter parse + resolve_v2).
+- `microservices` — List microservices with resolved type counts.
+- `map` — Symbol counts per kind, grouped by service or module.
+- `conventions` — Dominant roles + framework tallies.
+- `overview` — Bundle for a microservice, route, or topic.
+- `search` — Semantic search over Lance tables.
+- `vocab-index` — Rebuild the vocabulary index (absence diagnosis).
+- `watch` — keep the index fresh and serve warm queries while running
+
+Run `jrag <command> --help` for flags.
+```
 
 States and degradation:
 
@@ -178,9 +251,10 @@ same version) per the publish-pip skill.
 ## TLDR
 
 Remove all four shipped skill/agent artifacts (teaching causes over-exploration,
-#464); replace with `jrag prime --hook-json` — a ~15-line navigation-framed
-orientation (what jrag is, the verb catalog, trust-the-files, live index state)
-injected by a SessionStart hook wired through the install wizard. CLI surface
+#464); replace with `jrag prime --hook-json` — a navigation-framed orientation
+(~55 lines / ~500 tokens: what jrag is, the real `--help` command surface
+embedded verbatim, trust-the-files, live index state) injected by a SessionStart
+hook wired through the install wizard. CLI surface
 only; MCP tools self-announce. Bench Phase A rewrites the D prompt to
 runtime-generated prime output and runs the #464 slice; Phase B (removal +
 hook wiring, one 0.13.0 release) proceeds only if revised-D caps drop to ≤ A's.

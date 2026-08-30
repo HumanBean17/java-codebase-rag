@@ -1,6 +1,6 @@
 # jrag prime — replace skill/agent artifacts with a SessionStart priming hook
 
-**Status:** draft
+**Status:** in_progress
 
 ## Context
 

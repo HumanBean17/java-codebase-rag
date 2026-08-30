@@ -270,15 +270,18 @@ def test_validate_rejects_condition_allowing_escape_tool(tmp_path):
 
 
 def test_jrag_query_verbs_match_cli_agent_verbs():
-    """Drift guard: JRAG_QUERY_VERBS is exactly the CLI agent verbs minus watch/vocab-index.
+    """Drift guard: JRAG_QUERY_VERBS is exactly the CLI agent verbs minus the
+    non-query ones (watch/vocab-index/prime).
 
     Ties the bench's hand-list to the canonical ``cli_dispatch.AGENT_VERBS`` so a
     new agent verb is caught here (condition D would under-test it; B can't leak
-    it, but the list should stay complete).
+    it, but the list should stay complete). ``prime`` is excluded with the other
+    non-query verbs: the bench harness generates D's prime payload itself
+    (jrag-prime Task 3) — the agent under test never invokes ``jrag prime``.
     """
     from java_codebase_rag.cli_dispatch import AGENT_VERBS
 
-    assert set(JRAG_QUERY_VERBS) == set(AGENT_VERBS) - {"watch", "vocab-index"}
+    assert set(JRAG_QUERY_VERBS) == set(AGENT_VERBS) - {"watch", "vocab-index", "prime"}
 
 
 def test_only_condition_B_gets_lexical_deny():

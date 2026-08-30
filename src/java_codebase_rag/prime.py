@@ -12,12 +12,15 @@ the caller and passed in as a :class:`PrimeState`.
 This module must stay importable with the stdlib alone: it loads on the
 SessionStart hook path, where the vector stack (torch,
 sentence_transformers, lancedb, pyarrow, cocoindex) must never load.
-``render``/``render_hook_json`` are string formatting only — no I/O.
+``render``/``render_hook_json`` are string formatting only; the one I/O here
+is :func:`_staleness_since`, a metadata-only directory walk.
 """
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 __all__ = ["PRIME_TEMPLATE", "PrimeState", "render", "render_hook_json"]
 
@@ -47,6 +50,7 @@ and service boundaries — structure you'd otherwise grep for. You are the explo
 **Command reference**
 
 - `status` — Print index freshness, ontology version, and counts.
+- `prime` — Print agent priming context (index state + command surface).
 - `find` — Find nodes by query or filter.
 - `inspect` — Inspect a node by query.
 - `http-routes` — List HTTP routes.
@@ -138,3 +142,37 @@ def render_hook_json(state: PrimeState) -> str:
         },
         ensure_ascii=False,
     )
+
+
+# Pruned from the staleness walk. ``.java-codebase-rag`` is the index's own
+# directory (its mtimes move on every increment); the rest are build output
+# that would swamp the count without ever being indexed.
+_STALENESS_SKIP_DIRS = frozenset(
+    {".git", "target", "build", "node_modules", ".java-codebase-rag"}
+)
+
+
+def _staleness_since(built_at: float, source_root: Path, *, cap: int = 5000) -> int:
+    """Count ``.java``/``.kt`` files under ``source_root`` newer than ``built_at``.
+
+    Filesystem metadata only — mtimes, no reads and no parses — so the
+    SessionStart hook stays cheap. Bounded at ``cap`` so a mass rename or a
+    fresh checkout cannot turn the hook into a full-tree stat storm; the count
+    saturates and the payload reports ``cap`` files changed. Returns 0 for a
+    missing ``source_root`` (nothing walked, nothing newer).
+    """
+    changed = 0
+    for dirpath, dirnames, filenames in os.walk(source_root):
+        dirnames[:] = [d for d in dirnames if d not in _STALENESS_SKIP_DIRS]
+        for name in filenames:
+            if os.path.splitext(name)[1] not in (".java", ".kt"):
+                continue
+            try:
+                mtime = os.stat(os.path.join(dirpath, name)).st_mtime
+            except OSError:
+                continue  # raced with a delete; a gone file is not a change
+            if mtime > built_at:
+                changed += 1
+                if changed >= cap:
+                    return cap
+    return changed

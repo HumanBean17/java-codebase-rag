@@ -656,6 +656,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
         agents=args.agent,  # list of str (may be empty)
         scope=args.scope,
         model=args.model,
+        retrieval=getattr(args, "retrieval", None),
         surface=args.surface,
         source_root=None,  # None means cwd; installer confirms interactively
         quiet=bool(args.quiet),
@@ -1001,6 +1002,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Embedding model path or 'auto' (default: auto).",
+    )
+    install.add_argument(
+        "--retrieval",
+        choices=["vectors", "bm25"],
+        default=None,
+        help=(
+            "Retrieval mode: 'vectors' (semantic search; requires an embedding model "
+            "— auto-downloaded from Hugging Face or a local path) or 'bm25' "
+            "(keyword search; no model, no downloads, works offline). "
+            "Default: vectors."
+        ),
     )
     install.add_argument(
         "--surface",

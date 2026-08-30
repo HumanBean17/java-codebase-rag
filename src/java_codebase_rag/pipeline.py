@@ -28,6 +28,15 @@ VECTORS_SKIPPED_GRAPH_ONLY = (
     "(graph-only mode). The graph is built/refreshed; semantic search is unavailable."
 )
 
+# Operator-facing line printed when an indexing command skips the vectors phase
+# because the operator selected bm25 retrieval (``retrieval: bm25`` in the
+# project YAML / env / CLI): there is nothing to embed, so cocoindex is never
+# spawned. Sibling of VECTORS_SKIPPED_GRAPH_ONLY — same single-source-of-truth
+# rule so the wording can't drift between cli.py and server.py.
+VECTORS_SKIPPED_BM25 = (
+    "jrag: vectors skipped — retrieval mode is bm25; building graph only."
+)
+
 
 # Package-internal locations of the cocoindex flow definition and the graph
 # builder. Both are executed *by file path* — cocoindex loads the flow via a

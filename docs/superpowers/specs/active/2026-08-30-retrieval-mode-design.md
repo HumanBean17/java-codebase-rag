@@ -65,8 +65,10 @@ cannot be user-toggled); MCP/watch restart-on-switch automation.
   (`config.py:634-646`): new `retrieval` + `retrieval_source` fields on
   `ResolvedOperatorConfig`, republished into `os.environ` via
   `apply_to_os_environ` / `subprocess_env` so the MCP server, cocoindex
-  child, and watch daemon see one resolved value. Invalid values fail config
-  resolution, naming the two valid values.
+  child, and watch daemon see one resolved value. Invalid values: rejected
+  at the CLI tier by argparse `choices`; at the env/YAML tiers they degrade
+  gracefully — a stderr warning naming the two valid values and a fallback
+  to `vectors`/`default` (the `watch.backend` pattern, `config.py:721-727`).
 - **D3 — Wizard: one question, before the model question.** New
   `select_retrieval()` modeled on `select_surface` (`installer.py:576-635`):
   `vectors (Recommended)` — "semantic search; requires an embedding model,

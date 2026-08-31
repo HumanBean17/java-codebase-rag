@@ -16,6 +16,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
+# Driven by the script's own GUARDED_DIRS so the test cannot drift from it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from scripts.sync_agent_artifacts import GUARDED_DIRS  # noqa: E402
+
 
 
 # Paths relative to repo root
@@ -65,42 +71,34 @@ def test_install_data_artifacts_in_sync_with_dev_source():
     )
 
 
-# One guarded directory per side of the old sync: the dev source tree and its
-# install_data mirror. A reintroduced artifact must fail from either one.
-_STRAY_CASES = [
-    ("dev tree", Path("skills") / "explore-codebase" / "SKILL.md"),
-    ("install_data", Path("src/java_codebase_rag/install_data/agents/explorer-rag-enhanced.md")),
-]
-
-
-def test_sync_script_flags_reintroduced_artifact():
+@pytest.mark.parametrize("guarded_dir", GUARDED_DIRS, ids=str)
+def test_sync_script_flags_reintroduced_artifact(guarded_dir):
     """Verify --check exits non-zero when an artifact reappears.
 
-    Seeds a stray file into a fresh temp workspace (one case per guarded
-    directory) and runs the script with ``cwd`` pointed there, so the repo
-    is never mutated.
+    One case per guarded directory — both dev-side trees and their
+    install_data mirrors. Seeds a stray file into a fresh temp workspace and
+    runs the script with ``cwd`` pointed there, so the repo is never mutated.
     """
-    for label, stray_rel in _STRAY_CASES:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            stray = tmp_path / stray_rel
-            stray.parent.mkdir(parents=True, exist_ok=True)
-            stray.write_text("# this should not be here")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        stray = tmp_path / guarded_dir / "SKILL.md"
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("# this should not be here")
 
-            result = run_sync_script(check=True, cwd=tmp_path)
+        result = run_sync_script(check=True, cwd=tmp_path)
 
-            assert result.returncode == 1, (
-                f"[{label}] Expected --check to exit non-zero on a stray artifact, "
-                f"but got {result.returncode}.\n"
-                f"stdout: {result.stdout}\n"
-                f"stderr: {result.stderr}"
-            )
+        assert result.returncode == 1, (
+            f"[{guarded_dir}] Expected --check to exit non-zero on a stray "
+            f"artifact, but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}"
+        )
 
-            output = result.stdout + result.stderr
-            assert "extra file" in output.lower(), (
-                f"[{label}] Expected script to report the stray artifact.\n"
-                f"output: {output}"
-            )
+        output = result.stdout + result.stderr
+        assert "unexpected artifact" in output.lower(), (
+            f"[{guarded_dir}] Expected script to report the stray artifact.\n"
+            f"output: {output}"
+        )
 
 
 def test_sync_script_green_when_guarded_dirs_absent():

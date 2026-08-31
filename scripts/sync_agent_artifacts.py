@@ -9,7 +9,8 @@ script's remaining job is the absence guard: the directories in
 into a wheel or a release.
 
 Re-adding an artifact means restoring its ``SYNC_MAP`` pair; the sync/copy
-machinery below is unchanged and will pick it up.
+machinery below is unchanged and will pick it up, and the guard exempts the
+pair's files on both sides so a restored map runs green.
 
 Usage:
     python scripts/sync_agent_artifacts.py          # Copy dev → install_data
@@ -124,24 +125,29 @@ def sync_all(check_only: bool, repo_root: Path | None = None) -> int:
         if not verify_byte_equality(src_file, dst_file):
             out_of_sync.append((src_file, dst_file, "content differs"))
 
-    # Absence guard: no file may live in a guarded directory (or in a SYNC_MAP
-    # destination outside the mapped set).
-    all_dst_files = {dst for _, dst in all_pairs}
+    # Absence guard: no file may live in a guarded directory. Mapped files are
+    # exempt on BOTH sides — restoring a SYNC_MAP pair must revive the sync
+    # without its own sources tripping the guard, so only files the map does
+    # not account for are flagged. The stray-file boundary is scoped to
+    # GUARDED_DIRS: files elsewhere under install_data/ are out of scope.
+    all_mapped = {path for pair in all_pairs for path in pair}
     guarded_roots = [repo_root / d for d in GUARDED_DIRS]
     guarded_roots += [repo_root / dst_rel for _, dst_rel in SYNC_MAP]
     for guard_dir in guarded_roots:
         if guard_dir.exists():
             for stray in guard_dir.rglob("*"):
-                if stray.is_file() and stray not in all_dst_files:
+                if stray.is_file() and stray not in all_mapped:
                     out_of_sync.append((Path(""), stray, "extra file"))
 
-    # Extra files cannot be repaired by syncing — an empty SYNC_MAP has nothing
-    # to copy — so they fail --check and copy mode alike.
+    # Guard violations cannot be repaired by syncing — an empty SYNC_MAP has
+    # nothing to copy — so they fail --check and copy mode alike. release.sh
+    # points operators at the sync command on failure, which cannot clear
+    # this; the remedy is spelled out per file below.
     extras = [entry for entry in out_of_sync if entry[2] == "extra file"]
     if extras:
-        print("Agent artifacts out of sync:", file=sys.stderr)
+        print("Skill/agent artifacts must not ship:", file=sys.stderr)
         for _, stray, _ in extras:
-            print(f"  - {stray} (extra file)", file=sys.stderr)
+            print(f"  - {stray} (unexpected artifact; remove it or restore its SYNC_MAP pair)", file=sys.stderr)
         return 1
 
     if check_only:

@@ -32,7 +32,10 @@ _MCP_SERVER_NAME = "java-codebase-rag"
 # SessionStart hook constants. The marker is how we recognize our own hook
 # entry inside a host's settings.json — see ``_is_prime_hook_entry``.
 _HOOK_EVENT = "SessionStart"
-_HOOK_MARKER = "jrag prime"
+# Binary-agnostic: the entry may have been installed under either console
+# script (``jrag`` or the legacy ``java-codebase-rag``), so only the
+# ``prime --hook-json`` invocation suffix identifies the entry as ours.
+_HOOK_MARKER = " prime --hook-json"
 
 # Marker file written at install time so a CLI-only install (no MCP entry) is
 # still visible to ``update``. Lives at the project/source root alongside
@@ -852,11 +855,14 @@ def hooks_settings_path(host: HostConfig, scope: Scope, cwd: Path) -> Path:
 
 
 def _is_prime_hook_entry(entry: object) -> bool:
-    """True if a hook command entry is ours: type "command", command mentions jrag prime.
+    """True if a hook command entry is ours: type "command", command carries our prime invocation.
 
-    Matching on the ``jrag prime`` substring rather than an exact command keeps
-    the identification stable across absolute-path moves and argument changes —
-    anything claiming to be our prime hook is ours to replace or remove.
+    Matching on the `` prime --hook-json`` suffix rather than an exact command
+    keeps the identification stable across absolute-path moves and argument
+    changes — and across the binary name, since the hook may have been
+    installed via the legacy ``java-codebase-rag`` console script rather than
+    ``jrag``. Anything claiming to be our prime hook is ours to replace or
+    remove.
     """
     return (
         isinstance(entry, dict)
@@ -871,9 +877,10 @@ def merge_session_start_hook(config_path: Path, *, hook_command: str) -> bool:
 
     Ensures ``hooks -> SessionStart`` holds a list of matcher objects and that
     exactly one of them — the ``{"matcher": "", ...}`` catch-all — carries our
-    command entry. A stale ``jrag prime`` entry is replaced in place; when
-    absent the entry is appended. No other matcher, command entry, or sibling
-    top-level key is removed or reordered.
+    command entry. A stale entry of ours (either binary name — ``jrag`` or the
+    legacy ``java-codebase-rag``) is replaced in place; when absent the entry
+    is appended. No other matcher, command entry, or sibling top-level key is
+    removed or reordered.
 
     Args:
         config_path: Path to the host settings.json

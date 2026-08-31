@@ -755,9 +755,76 @@ class TestSessionStartHook:
             e["command"]
             for m in config["hooks"]["SessionStart"]
             for e in m["hooks"]
-            if "jrag prime" in e["command"]
+            if " prime --hook-json" in e["command"]
         ]
         assert commands == [command]
+
+    def test_session_start_hook_merge_replaces_legacy_binary_entry(self, tmp_path):
+        """an entry installed under the legacy ``java-codebase-rag`` console
+        script is ours too — replaced in place, never duplicated"""
+        from java_codebase_rag.installer import merge_session_start_hook
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            "/old/venv/bin/java-codebase-rag"
+                                            " prime --hook-json"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        command = "/new/jrag prime --hook-json"
+        assert merge_session_start_hook(config_path, hook_command=command) is True
+        with open(config_path) as f:
+            config = json.load(f)
+        entries = [
+            e for m in config["hooks"]["SessionStart"] for e in m["hooks"]
+        ]
+        assert entries == [{"type": "command", "command": command}]
+
+    def test_session_start_hook_remove_legacy_binary_entry(self, tmp_path):
+        """teardown also recognizes the legacy-binary entry — it must not
+        survive an uninstalled hook"""
+        from java_codebase_rag.installer import _remove_session_start_hook
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            "/usr/local/bin/java-codebase-rag"
+                                            " prime --hook-json"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        assert _remove_session_start_hook(config_path) is True
+        # ours was the only tenant → matcher, SessionStart and hooks all pruned
+        assert json.loads(config_path.read_text()) == {}
 
     def test_session_start_hook_merge_invalid_json_raises(self, tmp_path):
         """malformed settings.json → ValueError"""
@@ -816,7 +883,7 @@ class TestSessionStartHook:
                             {
                                 "matcher": "",
                                 "hooks": [
-                                    {"type": "command", "command": "/bin/jrag prime"}
+                                    {"type": "command", "command": "/bin/jrag prime --hook-json"}
                                 ],
                             }
                         ]
@@ -837,7 +904,7 @@ class TestSessionStartHook:
                             {
                                 "matcher": "",
                                 "hooks": [
-                                    {"type": "command", "command": "/bin/jrag prime"}
+                                    {"type": "command", "command": "/bin/jrag prime --hook-json"}
                                 ],
                             }
                         ]

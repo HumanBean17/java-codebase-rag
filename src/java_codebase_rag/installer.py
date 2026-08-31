@@ -29,6 +29,11 @@ Surface = Literal["mcp", "cli"]
 # MCP server name constant
 _MCP_SERVER_NAME = "java-codebase-rag"
 
+# SessionStart hook constants. The marker is how we recognize our own hook
+# entry inside a host's settings.json — see ``_is_prime_hook_entry``.
+_HOOK_EVENT = "SessionStart"
+_HOOK_MARKER = "jrag prime"
+
 # Marker file written at install time so a CLI-only install (no MCP entry) is
 # still visible to ``update``. Lives at the project/source root alongside
 # ``.java-codebase-rag.yml``. JSON shape:
@@ -766,6 +771,18 @@ def merge_mcp_config(config_path: Path, host: HostConfig, *, mcp_command: str) -
     config["mcpServers"][_MCP_SERVER_NAME] = new_entry
 
     # Write atomically (write to tmp, then rename)
+    _write_json_atomic(config_path, config)
+    return True
+
+
+def _write_json_atomic(config_path: Path, config: dict) -> None:
+    """Write ``config`` to ``config_path`` atomically (tmp file, fsync, rename).
+
+    Shared by ``merge_mcp_config`` and the SessionStart hook helpers so every
+    host settings/MCP file gets the same crash-safety: a temp file in the
+    destination directory, an fsync'd dump, then ``os.replace``. A failed write
+    never leaves a half-written destination behind.
+    """
     tmp_name = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -781,7 +798,6 @@ def merge_mcp_config(config_path: Path, host: HostConfig, *, mcp_command: str) -
 
         # Atomic rename
         os.replace(tmp_name, config_path)
-        return True
     except (IOError, OSError) as e:
         if tmp_name:
             try:
@@ -789,6 +805,164 @@ def merge_mcp_config(config_path: Path, host: HostConfig, *, mcp_command: str) -
             except OSError:
                 pass
         raise RuntimeError(f"Failed to write {config_path}: {e}") from e
+
+
+def _read_settings_json(config_path: Path) -> dict:
+    """Read a settings JSON file; missing file is ``{}``, invalid JSON raises.
+
+    Same read contract as ``merge_mcp_config`` so a settings file the host has
+    never written yet (fresh project scope) is indistinguishable from an empty
+    one, while a corrupt file fails loudly instead of being silently replaced.
+    """
+    if config_path.is_file():
+        try:
+            with open(config_path, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse {config_path}: {e}") from e
+    return {}
+
+
+def hooks_settings_path(host: HostConfig, scope: Scope, cwd: Path) -> Path:
+    """Return the host's settings.json — where SessionStart hooks are configured.
+
+    All three hosts keep hooks in the settings.json inside their host
+    directory: claude-code at ``.claude/settings.json`` (project) or
+    ``~/.claude/settings.json`` (user); qwen-code/gigacode in the very file
+    their MCP config already uses (``.qwen/settings.json``,
+    ``.gigacode/settings.json``), so one file holds both surfaces.
+    """
+    return host.scope_path(scope, cwd) / "settings.json"
+
+
+def _is_prime_hook_entry(entry: object) -> bool:
+    """True if a hook command entry is ours: type "command", command mentions jrag prime.
+
+    Matching on the ``jrag prime`` substring rather than an exact command keeps
+    the identification stable across absolute-path moves and argument changes —
+    anything claiming to be our prime hook is ours to replace or remove.
+    """
+    return (
+        isinstance(entry, dict)
+        and entry.get("type") == "command"
+        and isinstance(entry.get("command"), str)
+        and _HOOK_MARKER in entry["command"]
+    )
+
+
+def merge_session_start_hook(config_path: Path, *, hook_command: str) -> bool:
+    """Read, merge, write our SessionStart hook. Returns True if a write happened.
+
+    Ensures ``hooks -> SessionStart`` holds a list of matcher objects and that
+    exactly one of them — the ``{"matcher": "", ...}`` catch-all — carries our
+    command entry. A stale ``jrag prime`` entry is replaced in place; when
+    absent the entry is appended. No other matcher, command entry, or sibling
+    top-level key is removed or reordered.
+
+    Args:
+        config_path: Path to the host settings.json
+        hook_command: Full hook command line to install
+
+    Returns:
+        True if the entry was added/updated, False if no change was needed
+
+    Raises:
+        ValueError: If the existing settings file cannot be parsed as JSON
+    """
+    config = _read_settings_json(config_path)
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+        config["hooks"] = hooks
+    matchers = hooks.get(_HOOK_EVENT)
+    if not isinstance(matchers, list):
+        matchers = []
+        hooks[_HOOK_EVENT] = matchers
+
+    # Find (or create) the "" matcher that fires on every session start
+    matcher = next(
+        (m for m in matchers if isinstance(m, dict) and m.get("matcher") == ""),
+        None,
+    )
+    if matcher is None:
+        matcher = {"matcher": "", "hooks": []}
+        matchers.append(matcher)
+    entries = matcher.get("hooks")
+    if not isinstance(entries, list):
+        entries = []
+        matcher["hooks"] = entries
+
+    new_entry = {"type": "command", "command": hook_command}
+    ours = [i for i, entry in enumerate(entries) if _is_prime_hook_entry(entry)]
+    if not ours:
+        entries.append(new_entry)
+    else:
+        first = ours[0]
+        if ours == [first] and entries[first] == new_entry:
+            return False  # already installed with this exact command
+        entries[first] = new_entry
+        for i in reversed(ours[1:]):  # defensive: collapse duplicates
+            del entries[i]
+
+    _write_json_atomic(config_path, config)
+    return True
+
+
+def _remove_session_start_hook(config_path: Path, *, dry_run: bool = False) -> bool:
+    """Remove our SessionStart hook entry. Returns True if a removal was needed.
+
+    Drops only command entries we own, then prunes the containers our entry was
+    the last tenant of: the matcher object (empty ``hooks`` list), the
+    ``SessionStart`` list, and the ``hooks`` object. A missing file or an
+    already-absent entry is a no-op success. ``dry_run=True`` reports the
+    removal without touching the file.
+
+    Raises:
+        ValueError: If the existing settings file cannot be parsed as JSON
+    """
+    config = _read_settings_json(config_path)
+
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    matchers = hooks.get(_HOOK_EVENT)
+    if not isinstance(matchers, list):
+        return False
+
+    changed = False
+    emptied: list[int] = []
+    for index, matcher in enumerate(matchers):
+        if not isinstance(matcher, dict):
+            continue
+        entries = matcher.get("hooks")
+        if not isinstance(entries, list):
+            continue
+        kept = [e for e in entries if not _is_prime_hook_entry(e)]
+        if len(kept) == len(entries):
+            continue
+        changed = True
+        if kept:
+            matcher["hooks"] = kept
+        else:
+            emptied.append(index)
+
+    if not changed:
+        return False
+
+    # Prune only the matchers OUR removal emptied — a pre-existing empty
+    # matcher belongs to the host, not to us.
+    for index in reversed(emptied):
+        del matchers[index]
+    if not matchers:
+        del hooks[_HOOK_EVENT]
+    if not hooks:
+        del config["hooks"]
+
+    if dry_run:
+        return True
+    _write_json_atomic(config_path, config)
+    return True
 
 
 def _read_package_artifact(relative_path: str) -> str:

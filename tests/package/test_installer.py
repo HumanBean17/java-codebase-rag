@@ -647,6 +647,212 @@ class TestMergeMcpConfig:
             merge_mcp_config(config_path, HOSTS["claude-code"], mcp_command="/bin/mcp")
 
 
+class TestSessionStartHook:
+    """Test hooks_settings_path / merge_session_start_hook / _remove_session_start_hook."""
+
+    def test_session_start_hook_settings_path_resolves_per_host(self, tmp_path, monkeypatch):
+        """settings.json lives in host.scope_path for all three hosts"""
+        from java_codebase_rag.installer import HOSTS, hooks_settings_path
+        monkeypatch.setenv("HOME", str(tmp_path))
+        proj = tmp_path / "proj"
+        assert (
+            hooks_settings_path(HOSTS["claude-code"], "project", proj)
+            == proj / ".claude" / "settings.json"
+        )
+        assert (
+            hooks_settings_path(HOSTS["qwen-code"], "project", proj)
+            == proj / ".qwen" / "settings.json"
+        )
+        # user scope resolves under $HOME, not the project
+        assert (
+            hooks_settings_path(HOSTS["gigacode"], "user", proj)
+            == tmp_path / ".gigacode" / "settings.json"
+        )
+
+    def test_session_start_hook_merge_into_empty_settings(self, tmp_path):
+        """no file → creates hooks.SessionStart with our command; re-merge is a no-op"""
+        from java_codebase_rag.installer import merge_session_start_hook
+        config_path = tmp_path / "settings.json"
+        command = "/bin/jrag prime --hook-json"
+        result = merge_session_start_hook(config_path, hook_command=command)
+        assert result is True
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config == {
+            "hooks": {
+                "SessionStart": [
+                    {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+                ]
+            }
+        }
+        # identical second call → False, file bytes untouched
+        before = config_path.read_bytes()
+        assert merge_session_start_hook(config_path, hook_command=command) is False
+        assert config_path.read_bytes() == before
+
+    def test_session_start_hook_merge_preserves_siblings_and_other_hooks(self, tmp_path):
+        """existing security/$version/other matchers/other events survive the merge"""
+        from java_codebase_rag.installer import merge_session_start_hook
+        config_path = tmp_path / "settings.json"
+        seeded = {
+            "security": {"level": "high"},
+            "$version": 5,
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"type": "command", "command": "echo hi"}],
+                    }
+                ],
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "lint"}],
+                    }
+                ],
+            },
+        }
+        config_path.write_text(json.dumps(seeded))
+        command = "/new/jrag prime --hook-json"
+        assert merge_session_start_hook(config_path, hook_command=command) is True
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config["security"] == {"level": "high"}
+        assert config["$version"] == 5
+        assert config["hooks"]["PreToolUse"] == seeded["hooks"]["PreToolUse"]
+        session_start = config["hooks"]["SessionStart"]
+        # the foreign matcher stays first and untouched
+        assert session_start[0] == seeded["hooks"]["SessionStart"][0]
+        ours = [m for m in session_start if isinstance(m, dict) and m.get("matcher") == ""]
+        assert len(ours) == 1
+        assert ours[0]["hooks"] == [{"type": "command", "command": command}]
+
+    def test_session_start_hook_merge_replaces_stale_command(self, tmp_path):
+        """an older jrag prime entry is replaced in place, never duplicated"""
+        from java_codebase_rag.installer import merge_session_start_hook
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {"type": "command", "command": "/old/jrag prime --hook-json"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        command = "/new/jrag prime --hook-json"
+        assert merge_session_start_hook(config_path, hook_command=command) is True
+        with open(config_path) as f:
+            config = json.load(f)
+        commands = [
+            e["command"]
+            for m in config["hooks"]["SessionStart"]
+            for e in m["hooks"]
+            if "jrag prime" in e["command"]
+        ]
+        assert commands == [command]
+
+    def test_session_start_hook_merge_invalid_json_raises(self, tmp_path):
+        """malformed settings.json → ValueError"""
+        from java_codebase_rag.installer import merge_session_start_hook
+        config_path = tmp_path / "settings.json"
+        config_path.write_text("{invalid json!!!")
+        with pytest.raises(ValueError, match="Failed to parse"):
+            merge_session_start_hook(config_path, hook_command="/bin/jrag prime")
+
+    def test_session_start_hook_remove(self, tmp_path):
+        """remove drops only our entry, prunes emptied containers, honors dry_run"""
+        from java_codebase_rag.installer import _remove_session_start_hook
+        seeded = {
+            "security": {"level": "high"},
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"type": "command", "command": "echo hi"}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": "/bin/jrag prime --hook-json"}
+                        ],
+                    },
+                ],
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "lint"}],
+                    }
+                ],
+            },
+        }
+        config_path = tmp_path / "settings.json"
+        config_path.write_text(json.dumps(seeded))
+        assert _remove_session_start_hook(config_path) is True
+        with open(config_path) as f:
+            config = json.load(f)
+        assert config["security"] == {"level": "high"}
+        assert config["hooks"]["PreToolUse"] == seeded["hooks"]["PreToolUse"]
+        assert config["hooks"]["SessionStart"] == seeded["hooks"]["SessionStart"][:1]
+        # nothing left to remove → False, file bytes untouched
+        before = config_path.read_bytes()
+        assert _remove_session_start_hook(config_path) is False
+        assert config_path.read_bytes() == before
+
+        # ours was the only tenant → matcher, SessionStart and hooks all pruned
+        lone_path = tmp_path / "lone.json"
+        lone_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {"type": "command", "command": "/bin/jrag prime"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        assert _remove_session_start_hook(lone_path) is True
+        assert json.loads(lone_path.read_text()) == {}
+
+        # dry_run reports the removal but writes nothing
+        dry_path = tmp_path / "dry.json"
+        dry_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionStart": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {"type": "command", "command": "/bin/jrag prime"}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        dry_before = dry_path.read_bytes()
+        assert _remove_session_start_hook(dry_path, dry_run=True) is True
+        assert dry_path.read_bytes() == dry_before
+
+        # missing file → no-op success
+        assert _remove_session_start_hook(tmp_path / "absent.json") is False
+
+
 class TestDeployArtifacts:
     """Test deploy_artifacts function."""
 

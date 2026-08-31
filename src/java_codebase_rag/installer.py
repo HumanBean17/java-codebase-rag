@@ -156,6 +156,20 @@ ARTIFACT_MANIFEST: dict[Surface, list[ArtifactManifestEntry]] = {
     ],
 }
 
+# What 0.12.x deployed as real files, before the surfaces went entry/hook only:
+# the mcp-surface pair and the cli-surface pair. These paths are in no manifest,
+# so no surface's teardown reaches them — ``run_update`` removes them explicitly
+# via ``_remove_legacy_artifacts`` (both pairs: a user may have switched surfaces
+# across versions, and the marker records only the current one). Entries are
+# dest-relative like manifest rows; the leading ``skills``/``agents`` segment
+# picks ``host.skills_dir`` vs ``host.agents_dir`` as the resolution root.
+_LEGACY_ARTIFACT_PATHS: tuple[str, ...] = (
+    "skills/explore-codebase/SKILL.md",
+    "agents/explorer-rag-enhanced.md",
+    "skills/explore-codebase-cli/SKILL.md",
+    "agents/explorer-rag-cli.md",
+)
+
 
 def prompt(
     prompt_type: str,
@@ -2070,6 +2084,43 @@ def _undeploy_surface(
     return results
 
 
+def _remove_legacy_artifacts(
+    hosts: list[HostConfig], scope: Scope, cwd: Path, *, dry_run: bool = False
+) -> list[str]:
+    """Remove the 0.12.x skill/agent file deployments (update-time cleanup).
+
+    Those files are in no ``ARTIFACT_MANIFEST``, so no surface's teardown can
+    reach them; every legacy path is attempted for every host — whatever the
+    host's current surface is — because a user may have switched surfaces
+    across versions and the marker records only the current one. Paths resolve
+    against ``host.skills_dir``/``host.agents_dir`` exactly like manifest rows.
+
+    Returns the removed paths (with ``dry_run``, the paths that would be
+    removed); an empty list means nothing to do and is still a success.
+    Best-effort: a file that fails to remove warns but never fails the update.
+    """
+    removed: list[str] = []
+    for host in hosts:
+        for dest_relative in _LEGACY_ARTIFACT_PATHS:
+            root, _, leaf = dest_relative.partition("/")
+            base = (
+                host.skills_dir(scope, cwd)
+                if root == "skills"
+                else host.agents_dir(scope, cwd)
+            )
+            dest_path = base / leaf
+            # Probe first: absent files are nothing to do, and a removal (or a
+            # dry run) must not report paths that were never there.
+            if not dest_path.is_file():
+                continue
+            result = _remove_artifact_file(dest_path, dry_run=dry_run)
+            if result.success:
+                removed.append(str(dest_path))
+            else:
+                print(f"Warning: {result.error}")
+    return removed
+
+
 def _resolve_update_surface(*, surface: str | None, current: Surface) -> Surface | None:
     """Decide which surface ``run_update`` should target.
 
@@ -2193,6 +2244,22 @@ def run_update(
                 f"--surface {chosen_surface}`."
             )
             return EXIT_PARTIAL
+
+    # Legacy 0.12.x cleanup — unconditional, for both surfaces and both the
+    # refresh and the migration branches below: those installs shipped real
+    # skill/agent files no manifest knows about, so nothing else ever removes
+    # them. Grouped by scope because one marker can mix scopes.
+    hosts_by_scope: dict[Scope, list[HostConfig]] = {}
+    for host_config, scope, _host_surface in configured_hosts:
+        hosts_by_scope.setdefault(scope, []).append(host_config)
+    legacy_removed: list[str] = []
+    for scope, scope_hosts in hosts_by_scope.items():
+        legacy_removed.extend(
+            _remove_legacy_artifacts(scope_hosts, scope, cwd, dry_run=dry_run)
+        )
+    if legacy_removed:
+        verb = "Would remove" if dry_run else "Removed"
+        print(f"{verb} {len(legacy_removed)} legacy skill/agent file(s).")
 
     # Refresh (or migrate) artifacts for each host. When chosen_surface is None
     # (non-TTY, no flag) every host takes the refresh branch on its own surface.

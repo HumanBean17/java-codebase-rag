@@ -61,8 +61,8 @@ class ConfiguredHost(NamedTuple):
 
     Replaces the prior 2-tuple ``(HostConfig, scope)`` returned by
     ``detect_configured_hosts`` so ``update`` can route the refresh through the
-    correct ``Surface`` (an MCP-surface install refreshes MCP+skill+agent; a
-    CLI-surface install refreshes the CLI skill+agent only).
+    correct ``Surface`` (an MCP-surface install refreshes the MCP entry; a
+    CLI-surface install refreshes the SessionStart prime hook).
     """
 
     host: "HostConfig"
@@ -126,31 +126,33 @@ HOSTS: dict[str, HostConfig] = {
 
 # ---------------------------------------------------------------------------
 # ArtifactManifest — single source of truth for which artifacts each surface
-# ships. Iterated by both ``deploy_artifacts`` and ``refresh_artifacts`` so
-# adding/removing an artifact is one edit, not two.
+# ships. Iterated by ``deploy_artifacts``, ``refresh_artifacts`` and
+# ``_undeploy_surface`` so adding/removing an artifact is one edit, not three.
 #
 # Each entry is a 3-tuple ``(kind, package_path, dest_relative)``:
 #   - ``kind``: "mcp" dispatches to ``_deploy_mcp_config`` / ``_refresh_mcp_config``
-#     (the MCP config path is host/scope-resolved inside those helpers —
-#     ``package_path`` and ``dest_relative`` are unused for this kind).
-#   - ``kind``: "skill" | "agent" dispatches to ``_deploy_file`` / ``_refresh_file``.
+#     / ``_remove_mcp_entry`` — the MCP config path is host/scope-resolved inside
+#     those helpers, so ``package_path`` and ``dest_relative`` are unused.
+#   - ``kind``: "hook" dispatches to ``_deploy_hook`` / ``_refresh_hook`` /
+#     ``_remove_hook`` — a SessionStart prime hook merged into the host
+#     settings.json (``hooks_settings_path``); again no paths are needed.
+#   - ``kind``: "skill" | "agent" dispatches to ``_deploy_file`` / ``_refresh_file``
+#     (kept for callers that still exercise the file helpers).
 #   - ``package_path``: relative path under ``install_data/``.
 #   - ``dest_relative``: relative path under ``host.scope_path(scope, cwd)``.
 #
-# The ``mcp`` surface carries the MCP config entry; the ``cli`` surface does
-# NOT (a CLI install never registers an MCP server).
+# NEITHER surface ships files: ``mcp`` registers the stdio MCP server entry
+# (tools only), ``cli`` installs a ``jrag prime`` SessionStart hook. Skill and
+# agent artifacts are legacy state on disk — cleanup is a separate concern.
 # ---------------------------------------------------------------------------
 ArtifactManifestEntry = tuple[str, str, str]
 
 ARTIFACT_MANIFEST: dict[Surface, list[ArtifactManifestEntry]] = {
     "mcp": [
         ("mcp", "", ""),
-        ("skill", "skills/explore-codebase/SKILL.md", "skills/explore-codebase/SKILL.md"),
-        ("agent", "agents/explorer-rag-enhanced.md", "agents/explorer-rag-enhanced.md"),
     ],
     "cli": [
-        ("skill", "skills/explore-codebase-cli/SKILL.md", "skills/explore-codebase-cli/SKILL.md"),
-        ("agent", "agents/explorer-rag-cli.md", "agents/explorer-rag-cli.md"),
+        ("hook", "", ""),
     ],
 }
 
@@ -586,10 +588,10 @@ def select_surface(
 ) -> Surface:
     """Select 'mcp' or 'cli' surface (PR-JRAG-5).
 
-    The MCP surface registers the stdio MCP server. The CLI surface ships the
-    ``jrag`` console-script skill+subagent instead — no MCP entry is registered.
-    The CLI surface is the recommended default (listed first, marked
-    "(Recommended)").
+    The MCP surface registers the stdio MCP server (tools only). The CLI
+    surface installs a ``jrag prime`` SessionStart hook instead — no MCP entry
+    is registered and no files are deployed. The CLI surface is the recommended
+    default (listed first, marked "(Recommended)").
 
     Args:
         non_interactive: If True, honor ``cli_surface`` (default ``"cli"``).
@@ -615,8 +617,8 @@ def select_surface(
         return "cli"
 
     print(
-        "Note: 'cli' surface deploys the `jrag` console-script skill+subagent "
-        "(one command per intent, no MCP server) — recommended."
+        "Note: 'cli' surface installs a `jrag prime` SessionStart hook "
+        "(one command per intent, no MCP server, no files) — recommended."
     )
     print(
         "      'mcp' surface registers the java-codebase-rag MCP server "
@@ -965,6 +967,137 @@ def _remove_session_start_hook(config_path: Path, *, dry_run: bool = False) -> b
     return True
 
 
+def _prime_hook_command() -> str:
+    """Return the SessionStart hook command line (``<jrag> prime --hook-json``).
+
+    The ``jrag`` binary comes from the same resolution the install wizard uses
+    for the cli surface (``resolve_mcp_command`` -> ``_surface_binary("cli")``).
+    """
+    jrag_bin = resolve_mcp_command(non_interactive=True, surface="cli")
+    return f"{jrag_bin} prime --hook-json"
+
+
+def _installed_hook_command(config_path: Path) -> str | None:
+    """Return our installed SessionStart hook command, or ``None`` when absent.
+
+    Walks the same ``hooks -> SessionStart -> matcher`` shape the merge/remove
+    helpers do. ``None`` also covers "absent" and "duplicated" — the caller only
+    compares against the desired command, and ``merge_session_start_hook``
+    collapses duplicates when it writes.
+
+    Raises:
+        ValueError: If the existing settings file cannot be parsed as JSON
+    """
+    config = _read_settings_json(config_path)
+    hooks = config.get("hooks")
+    if not isinstance(hooks, dict):
+        return None
+    matchers = hooks.get(_HOOK_EVENT)
+    if not isinstance(matchers, list):
+        return None
+
+    commands: list[str] = []
+    for matcher in matchers:
+        if not isinstance(matcher, dict):
+            continue
+        entries = matcher.get("hooks")
+        if not isinstance(entries, list):
+            continue
+        commands.extend(e["command"] for e in entries if _is_prime_hook_entry(e))
+    return commands[0] if len(commands) == 1 else None
+
+
+def _deploy_hook(config_path: Path, *, hook_command: str) -> ArtifactResult:
+    """Deploy our SessionStart prime hook entry into a host settings.json."""
+    try:
+        # Ensure parent directory exists
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check writability
+        if not _is_writable(config_path.parent):
+            return ArtifactResult(
+                path=config_path,
+                success=False,
+                error=f"Directory not writable: {config_path.parent}",
+            )
+
+        # Merge hook (returns True if updated, False if already current)
+        merge_session_start_hook(config_path, hook_command=hook_command)
+        return ArtifactResult(path=config_path, success=True, error=None)
+    except ValueError as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+    except Exception as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+
+
+def _refresh_hook(
+    config_path: Path,
+    *,
+    force: bool,
+    dry_run: bool,
+) -> ArtifactResult:
+    """Refresh the SessionStart hook entry (update command path if needed).
+
+    The hook is content-addressed by the resolved ``jrag`` path, so a matching
+    entry needs no rewrite — ``force`` is inert for this kind: unlike a
+    skill/agent file there is no shipped payload worth re-copying.
+    """
+    try:
+        hook_command = _prime_hook_command()
+
+        if _installed_hook_command(config_path) == hook_command and not force:
+            return ArtifactResult(path=config_path, success=True, error=None)
+
+        if dry_run:
+            print(f"Would update SessionStart hook at {config_path}")
+            return ArtifactResult(path=config_path, success=True, error=None)
+
+        # Ensure parent directory exists
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check writability
+        if not _is_writable(config_path.parent):
+            return ArtifactResult(
+                path=config_path,
+                success=False,
+                error=f"Directory not writable: {config_path.parent}",
+            )
+
+        changed = merge_session_start_hook(config_path, hook_command=hook_command)
+        if changed:
+            print(f"Updated SessionStart hook at {config_path}")
+        return ArtifactResult(path=config_path, success=True, error=None)
+
+    except SystemExit:
+        # resolve_mcp_command raises when jrag is not on PATH
+        return ArtifactResult(
+            path=config_path, success=False, error="jrag not found on PATH"
+        )
+    except ValueError as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+    except Exception as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+
+
+def _remove_hook(config_path: Path, *, dry_run: bool) -> ArtifactResult:
+    """Remove our SessionStart hook entry (surface migration teardown).
+
+    A corrupt settings file is a FAILED result, not a raised error: one broken
+    host file must not abort the surface switch — ``_undeploy_surface`` keeps
+    iterating and ``run_update`` reports the warning with a partial exit code.
+    """
+    try:
+        changed = _remove_session_start_hook(config_path, dry_run=dry_run)
+    except ValueError as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+    except Exception as e:
+        return ArtifactResult(path=config_path, success=False, error=str(e))
+
+    if changed:
+        print(f"{'Would remove' if dry_run else 'Removed'} SessionStart hook from {config_path}")
+    return ArtifactResult(path=config_path, success=True, error=None)
+
+
 def _read_package_artifact(relative_path: str) -> str:
     """Read a shipped artifact from package data. Returns UTF-8 text."""
     from importlib.resources import files
@@ -982,7 +1115,7 @@ def deploy_artifacts(
     mcp_command: str,
     surface: Surface = "mcp",
 ) -> list[ArtifactResult]:
-    """Deploy artifacts (MCP config, skill, agent) to selected hosts.
+    """Deploy artifacts (MCP entry / SessionStart hook) to selected hosts.
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so both surfaces share one source
     of truth. The keyword-only ``surface`` defaults to ``"mcp"`` so existing
@@ -995,8 +1128,8 @@ def deploy_artifacts(
         non_interactive: If True, skip overwrite prompts
         mcp_command: Resolved absolute path to the runtime binary
             (``java-codebase-rag-mcp`` for ``mcp`` surface; ``jrag`` for
-            ``cli`` surface — unused for the latter since CLI ships no MCP
-            config).
+            ``cli`` surface, where it becomes the SessionStart hook command —
+            no MCP config is registered).
         surface: Which artifact set to deploy (default ``"mcp"`` for back-comat).
 
     Returns:
@@ -1016,6 +1149,16 @@ def deploy_artifacts(
                     host,
                     non_interactive=non_interactive,
                     mcp_command=mcp_command,
+                )
+            elif kind == "hook":
+                # Only the CLI surface carries this row: a ``jrag prime``
+                # SessionStart hook in the host settings.json. ``mcp_command``
+                # IS the resolved ``jrag`` binary on this surface (resolved by
+                # the caller via resolve_mcp_command(surface="cli")).
+                hook_config_path = hooks_settings_path(host, scope, cwd)
+                result = _deploy_hook(
+                    hook_config_path,
+                    hook_command=f"{mcp_command} prime --hook-json",
                 )
             else:
                 dest_path = host.scope_path(scope, cwd) / dest_relative
@@ -1597,7 +1740,7 @@ def refresh_artifacts(
     dry_run: bool,
     surface: Surface = "mcp",
 ) -> list[ArtifactResult]:
-    """Overwrite skill and agent files from package data. Skip MCP if entry is correct.
+    """Refresh the surface's artifacts (MCP entry path / SessionStart hook).
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so both surfaces share one source
     of truth (PR-JRAG-5). The keyword-only ``surface`` defaults to ``"mcp"``
@@ -1607,7 +1750,7 @@ def refresh_artifacts(
         host: HostConfig for the agent host
         scope: Installation scope ("project" or "user")
         cwd: Current working directory
-        force: If True, overwrite all files even if matching
+        force: If True, overwrite all files even if matching (inert for the hook)
         dry_run: If True, print changes without writing
         surface: Which artifact set to refresh (default ``"mcp"`` for back-comat).
 
@@ -1626,6 +1769,11 @@ def refresh_artifacts(
             # surface ships no MCP entry, so there is nothing to refresh.
             mcp_config_path = host.mcp_config_path(scope, cwd)
             result = _refresh_mcp_config(mcp_config_path, host, force=force, dry_run=dry_run)
+        elif kind == "hook":
+            # Refresh the SessionStart hook: the command is re-resolved so a
+            # moved ``jrag`` binary (e.g. a rebuilt venv) is repaired in place.
+            hook_config_path = hooks_settings_path(host, scope, cwd)
+            result = _refresh_hook(hook_config_path, force=force, dry_run=dry_run)
         else:
             dest_path = host.scope_path(scope, cwd) / dest_relative
             result = _refresh_file(
@@ -1903,15 +2051,19 @@ def _undeploy_surface(
     """Tear down every artifact a surface shipped (migration off ``surface``).
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so adding/removing an artifact is
-    one manifest edit, not two — mirrors ``deploy_artifacts``/``refresh_artifacts``.
-    The ``mcp`` row removes just our server entry; ``skill``/``agent`` rows
-    remove the file. Returns one ``ArtifactResult`` per manifest row.
+    one manifest edit, not three — mirrors ``deploy_artifacts``/``refresh_artifacts``.
+    The ``mcp`` row removes just our server entry; the ``hook`` row removes our
+    SessionStart entry. Returns one ``ArtifactResult`` per manifest row, and a
+    failure (e.g. a corrupt settings file) never stops the remaining rows.
     """
     results: list[ArtifactResult] = []
     for kind, _package_path, dest_relative in ARTIFACT_MANIFEST[surface]:
         if kind == "mcp":
             mcp_config_path = host.mcp_config_path(scope, cwd)
             results.append(_remove_mcp_entry(mcp_config_path, dry_run=dry_run))
+        elif kind == "hook":
+            hook_config_path = hooks_settings_path(host, scope, cwd)
+            results.append(_remove_hook(hook_config_path, dry_run=dry_run))
         else:
             dest_path = host.scope_path(scope, cwd) / dest_relative
             results.append(_remove_artifact_file(dest_path, dry_run=dry_run))

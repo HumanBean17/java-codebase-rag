@@ -589,13 +589,25 @@ def test_run_cell_passes_prime_context(tmp_path, monkeypatch):
     test is the prime contract: same context in the payload as in the spawn env.
     """
     import dataclasses
+    import os
     import sys
 
     from bench.claude_runner import CellSpec, run_cell
     from bench.load_corpora import CorpusRecord, IndexManifest
     from bench.load_questions import Question
 
-    sentinel = _stub_prime(monkeypatch)
+    # Record the context ``run_cell`` hands to the generator instead of a
+    # blind stub, so the test can pin it to the context the spawn env gets.
+    prime_calls: list[tuple[str, str, str]] = []
+
+    def recording_prime(jrag_bin, source_root, index_dir):
+        prime_calls.append((jrag_bin, source_root, index_dir))
+        return PRIME_SENTINEL
+
+    monkeypatch.setattr("bench.load_conditions._PRIME_TOOLS_CACHE", {})
+    monkeypatch.setattr(
+        "bench.load_conditions._generate_prime_tools_section", recording_prime
+    )
 
     d = next(c for c in load_conditions("bench/conditions.yml") if c.id == "D")
     repo_root = Path(__file__).resolve().parents[2]
@@ -646,9 +658,24 @@ def test_run_cell_passes_prime_context(tmp_path, monkeypatch):
     )
 
     assert result.exit_reason == "done"
+
+    # The generator ran once, on the exact context the cell runs under: the
+    # resolved jrag binary, the absolutized checkout, and the absolutized
+    # index dir — the same three values ``run_cell`` puts on the spawn env
+    # (``JAVA_CODEBASE_RAG_INDEX_DIR`` / ``JAVA_CODEBASE_RAG_SOURCE_ROOT``).
+    # The relative index_dir absolutizes against the driver's cwd, exactly as
+    # the env value does.
+    assert prime_calls == [
+        (
+            os.path.abspath(str(fake_jrag)),
+            os.path.join(str(tmp_path), "bench/checkouts/spring-boot-baseline"),
+            os.path.abspath("bench/indexes/spring-boot-baseline"),
+        )
+    ]
+
     recorded = argv_sidecar.read_text()
     # The spawned --append-system-prompt carries the generated payload...
-    assert sentinel in recorded
+    assert PRIME_SENTINEL in recorded
     # ...and NOT the prompt file's hand-written tools section.
     assert "You investigate the codebase with the **`jrag` CLI**" not in recorded
     # prompt_hash stays a pure function of the composed prompt.

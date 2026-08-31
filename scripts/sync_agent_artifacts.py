@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Sync agent and skill artifacts from dev source to install_data.
 
-This script maintains a single source of truth for shipped agent artifacts:
-- Dev source: skills/explore-codebase/ and agents/*.md
-- Shipped: java_codebase_rag/install_data/skills/explore-codebase/ and install_data/agents/
+Skill/agent consumer artifacts were removed: the CLI surface ships a
+``jrag prime`` SessionStart hook and the MCP surface registers the server
+entry — neither deploys files. ``SYNC_MAP`` is therefore empty and this
+script's remaining job is the absence guard: the directories in
+``GUARDED_DIRS`` must contain no files, so the artifacts cannot creep back
+into a wheel or a release.
+
+Re-adding an artifact means restoring its ``SYNC_MAP`` pair; the sync/copy
+machinery below is unchanged and will pick it up.
 
 Usage:
     python scripts/sync_agent_artifacts.py          # Copy dev → install_data
@@ -24,12 +30,18 @@ import sys
 from pathlib import Path
 
 
-# Mapping of source (dev) paths to destination (install_data) paths
-# Only these subtrees are shipped - skills/README.md is explicitly excluded
-SYNC_MAP: list[tuple[Path, Path]] = [
-    (Path("skills/explore-codebase"), Path("src/java_codebase_rag/install_data/skills/explore-codebase")),
-    (Path("skills/explore-codebase-cli"), Path("src/java_codebase_rag/install_data/skills/explore-codebase-cli")),
-    (Path("agents"), Path("src/java_codebase_rag/install_data/agents")),
+# Mapping of source (dev) paths to destination (install_data) paths.
+# Empty since the artifacts were removed — see the module docstring.
+SYNC_MAP: list[tuple[Path, Path]] = []
+
+# Directories that must contain no files. Covers both halves of the old sync
+# (the dev source tree and its install_data mirror) so a reintroduced artifact
+# fails the release gate regardless of which side it lands on.
+GUARDED_DIRS: list[Path] = [
+    Path("skills"),
+    Path("agents"),
+    Path("src/java_codebase_rag/install_data/skills"),
+    Path("src/java_codebase_rag/install_data/agents"),
 ]
 
 
@@ -100,10 +112,6 @@ def sync_all(check_only: bool, repo_root: Path | None = None) -> int:
         dst_dir = repo_root / dst_rel
         all_pairs.extend(collect_files(src_dir, dst_dir))
 
-    if not all_pairs:
-        print("No files to sync - check source directories exist", file=sys.stderr)
-        return 1
-
     # Check for drift
     out_of_sync: list[tuple[Path, Path, str]] = []
     missing: list[tuple[Path, Path]] = []
@@ -116,14 +124,25 @@ def sync_all(check_only: bool, repo_root: Path | None = None) -> int:
         if not verify_byte_equality(src_file, dst_file):
             out_of_sync.append((src_file, dst_file, "content differs"))
 
-    # Check for extra files in destination that shouldn't be there
+    # Absence guard: no file may live in a guarded directory (or in a SYNC_MAP
+    # destination outside the mapped set).
     all_dst_files = {dst for _, dst in all_pairs}
-    for src_rel, dst_rel in SYNC_MAP:
-        dst_dir = repo_root / dst_rel
-        if dst_dir.exists():
-            for dst_file in dst_dir.rglob("*"):
-                if dst_file.is_file() and dst_file not in all_dst_files:
-                    out_of_sync.append((Path(""), dst_file, "extra file in install_data"))
+    guarded_roots = [repo_root / d for d in GUARDED_DIRS]
+    guarded_roots += [repo_root / dst_rel for _, dst_rel in SYNC_MAP]
+    for guard_dir in guarded_roots:
+        if guard_dir.exists():
+            for stray in guard_dir.rglob("*"):
+                if stray.is_file() and stray not in all_dst_files:
+                    out_of_sync.append((Path(""), stray, "extra file"))
+
+    # Extra files cannot be repaired by syncing — an empty SYNC_MAP has nothing
+    # to copy — so they fail --check and copy mode alike.
+    extras = [entry for entry in out_of_sync if entry[2] == "extra file"]
+    if extras:
+        print("Agent artifacts out of sync:", file=sys.stderr)
+        for _, stray, _ in extras:
+            print(f"  - {stray} (extra file)", file=sys.stderr)
+        return 1
 
     if check_only:
         # --check mode: report issues and exit non-zero if any
@@ -133,7 +152,7 @@ def sync_all(check_only: bool, repo_root: Path | None = None) -> int:
 
         print("Agent artifacts out of sync:", file=sys.stderr)
         for src_file, dst_file, reason in out_of_sync:
-            if reason == "extra file in install_data":
+            if reason == "extra file":
                 print(f"  - {dst_file} (extra file)", file=sys.stderr)
             else:
                 print(f"  - {dst_file} (differs from source)", file=sys.stderr)

@@ -900,6 +900,13 @@ class TestDeployArtifacts:
             return "skip"
         monkeypatch.setattr("java_codebase_rag.installer.prompt", mock_prompt)
 
+        # No surface ships package files, so the package artifact this used to
+        # read from install_data is supplied directly.
+        monkeypatch.setattr(
+            "java_codebase_rag.installer._read_package_artifact",
+            lambda path: "new content",
+        )
+
         result = _deploy_file(
             skill_file,
             "skills/explore-codebase/SKILL.md",

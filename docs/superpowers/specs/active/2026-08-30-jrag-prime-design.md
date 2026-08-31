@@ -269,4 +269,5 @@ embedded verbatim, trust-the-files, live index state) injected by a SessionStart
 hook wired through the install wizard. CLI surface
 only; MCP tools self-announce. Bench Phase A rewrites the D prompt to
 runtime-generated prime output and runs the #464 slice; Phase B (removal +
-hook wiring, one 0.13.0 release) proceeds only if revised-D caps drop to ≤ A's.
+hook wiring, one 0.13.0 release) proceeds only if revised-D caps drop to ≤ A's
+(gate subsequently FAILED — see Rollout; merge decision deferred to PR review).

@@ -2,18 +2,20 @@
 
 Pure unit tests for the SessionStart priming payload: canonical template
 shape, freshness variants, hook-JSON envelope, stdlib-only import purity,
-and a drift guard pinning the embedded command surface to the real
-``jrag --help`` output.
+the staleness-walk cost bounds, and a drift guard pinning the embedded
+command surface to the real ``jrag --help`` output.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from java_codebase_rag.prime import PrimeState, render, render_hook_json
+from java_codebase_rag.prime import PrimeState, _staleness_since, render, render_hook_json
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _JRAG_EXE = _REPO_ROOT / ".venv" / "bin" / "jrag"
@@ -153,7 +155,78 @@ def test_template_is_stdlib_pure() -> None:
     assert not pulled, f"prime import pulled heavy deps: {pulled}"
 
 
-# ----- Test 5: drift guard against real `jrag --help` -----
+# ----- Test 5: staleness walk cost bounds -----
+
+
+def _seed_sources(root: Path, names: list[str], *, built_at: float, newer: bool) -> None:
+    """Write source files stamped an hour newer (changed) or older (unchanged)
+    than ``built_at``. Subdirectories in ``names`` are created as needed."""
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = built_at + 3600.0 if newer else built_at - 3600.0
+    for name in names:
+        p = root / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("class C {}\n")
+        os.utime(p, (stamp, stamp))
+
+
+def test_staleness_walk_counts_changes_exactly(tmp_path: Path) -> None:
+    """Changed ``.java``/``.kt`` files are counted; other extensions and skip
+    dirs are not; an all-unchanged tree under the cap returns a verified 0."""
+    built_at = time.time()
+    _seed_sources(
+        tmp_path,
+        ["a.java", "b.kt", "target/Gen.java"],
+        built_at=built_at,
+        newer=False,
+    )
+    _seed_sources(
+        tmp_path, ["c.java", "d.kt", "e.txt"], built_at=built_at, newer=True
+    )
+
+    assert _staleness_since(built_at, tmp_path) == 2  # c.java + d.kt only
+    assert _staleness_since(built_at, tmp_path / "does-not-exist") == 0
+
+
+def test_staleness_walk_visited_cap_returns_none(tmp_path: Path) -> None:
+    """More than ``cap`` all-unchanged files → give up as unknown (``None``),
+    not a verified 0 — the walk must stay bounded on every session start."""
+    built_at = time.time()
+    _seed_sources(
+        tmp_path, [f"u{i}.java" for i in range(6)], built_at=built_at, newer=False
+    )
+
+    assert _staleness_since(built_at, tmp_path, cap=5) is None
+    # Under the cap the same tree is walked to completion: a verified 0.
+    assert _staleness_since(built_at, tmp_path, cap=6) == 0
+
+
+def test_staleness_walk_cap_saturates_changed_count(tmp_path: Path) -> None:
+    """The changed-count still saturates at ``cap`` once changes are found."""
+    built_at = time.time()
+    _seed_sources(
+        tmp_path, ["c0.java", "c1.java", "c2.java"], built_at=built_at, newer=True
+    )
+
+    assert _staleness_since(built_at, tmp_path, cap=2) == 2
+
+
+def test_staleness_walk_counts_past_visited_cap_once_changed(tmp_path: Path) -> None:
+    """A change already found keeps the walk going past the visited cap to an
+    exact count — the visited bound protects the fresh-tree case; it must not
+    truncate a count already worth reporting. The changed file sits in the
+    walk root (os.walk visits the root's files before any subdirectory), so
+    the change is always found before the cap trips."""
+    built_at = time.time()
+    _seed_sources(tmp_path, ["changed.java"], built_at=built_at, newer=True)
+    _seed_sources(
+        tmp_path, [f"pkg/u{i}.java" for i in range(5)], built_at=built_at, newer=False
+    )
+
+    assert _staleness_since(built_at, tmp_path, cap=4) == 1
+
+
+# ----- Test 6: drift guard against real `jrag --help` -----
 
 
 def _collapse(text: str) -> str:

@@ -231,6 +231,40 @@ def test_prime_reports_staleness(
         os.utime(target, (stat.st_atime, stat.st_mtime))
 
 
+def test_prime_unknown_staleness_renders_bare_stale(
+    corpus_root: Path,
+    ladybug_db_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    """An unknown staleness (walk hit its visited-files cap) renders bare
+    "stale" — never "fresh", and with no file count to invent."""
+    import java_codebase_rag.prime as prime_mod
+    from java_codebase_rag import jrag as jrag_mod
+
+    monkeypatch.setattr(prime_mod, "_staleness_since", lambda *_a, **_k: None)
+
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", str(corpus_root))
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_INDEX_DIR", str(ladybug_db_path.parent))
+    # ``_resolve_cfg`` -> ``apply_to_os_environ`` writes process env without
+    # monkeypatch's knowledge; restore it so later tests in this process are
+    # unaffected by SBERT_MODEL & friends.
+    env_snapshot = dict(os.environ)
+    try:
+        parser = jrag_mod.build_parser()
+        rc = jrag_mod._cmd_prime(parser.parse_args(["prime"]))
+    finally:
+        os.environ.clear()
+        os.environ.update(env_snapshot)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert _IDENTITY_LINE in out
+    freshness = _state_bullets(out)[0]
+    assert freshness.startswith("- Index stale (incremented")
+    assert "files changed" not in freshness
+
+
 # ----- Test 5: import guard (in-process) -----
 
 

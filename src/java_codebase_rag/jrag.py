@@ -1807,7 +1807,10 @@ def _prime_state(cfg, graph, meta: dict):
         service_names = tuple(ranked)
 
     return PrimeState(
-        freshness="stale" if changed > 0 else "fresh",
+        # ``changed is None`` means the staleness walk hit its visited-files
+        # cap before finding a change: freshness is unknown, rendered as a
+        # bare "stale" — an unverified index must not claim to be fresh.
+        freshness="stale" if changed is None or changed > 0 else "fresh",
         changed_files=changed,
         last_increment_age=_humanize_age(max(0.0, time.time() - built_at)),
         service_count=len(ranked),

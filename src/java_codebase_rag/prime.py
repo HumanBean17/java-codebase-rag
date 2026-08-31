@@ -152,21 +152,29 @@ _STALENESS_SKIP_DIRS = frozenset(
 )
 
 
-def _staleness_since(built_at: float, source_root: Path, *, cap: int = 5000) -> int:
+def _staleness_since(built_at: float, source_root: Path, *, cap: int = 5000) -> int | None:
     """Count ``.java``/``.kt`` files under ``source_root`` newer than ``built_at``.
 
     Filesystem metadata only — mtimes, no reads and no parses — so the
-    SessionStart hook stays cheap. Bounded at ``cap`` so a mass rename or a
-    fresh checkout cannot turn the hook into a full-tree stat storm; the count
-    saturates and the payload reports ``cap`` files changed. Returns 0 for a
-    missing ``source_root`` (nothing walked, nothing newer).
+    SessionStart hook stays cheap. Two bounds share ``cap``: the changed-count
+    saturates (a mass rename or fresh checkout reports ``cap`` and stops), and
+    the total files visited is capped so a fresh index over a huge tree cannot
+    turn every session start into a full-tree stat storm — once ``cap``
+    all-unchanged files have been visited without finding a change, the walk
+    gives up and returns ``None`` (unknown), not a verified 0. Every other
+    case returns the exact ``int`` count. Returns 0 for a missing
+    ``source_root`` (nothing walked, nothing newer).
     """
     changed = 0
+    visited = 0
     for dirpath, dirnames, filenames in os.walk(source_root):
         dirnames[:] = [d for d in dirnames if d not in _STALENESS_SKIP_DIRS]
         for name in filenames:
             if os.path.splitext(name)[1] not in (".java", ".kt"):
                 continue
+            visited += 1
+            if visited > cap and changed == 0:
+                return None  # all-unchanged walk unbounded — unknown, not zero
             try:
                 mtime = os.stat(os.path.join(dirpath, name)).st_mtime
             except OSError:

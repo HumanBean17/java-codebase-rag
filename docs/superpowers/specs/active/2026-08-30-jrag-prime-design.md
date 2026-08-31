@@ -154,12 +154,17 @@ in every session of every repo and must never nag repos it does not index.
 Prime is hook-safe by construction: every soft state degrades to empty output.
 
 Latency constraint: SessionStart fires on start, resume, and after compaction.
-Prime reads filesystem metadata only — project-root discovery, index-dir
-mtimes, graph meta, the watch daemon state file (`watch/paths.py`). It must
-not import the vector stack or open Lance/graph stores; freshness detection is
-extracted from `_cmd_status` (`jrag.py`) into a shared helper if currently
-embedded there. Coverage counts that would require opening a store are dropped
-from the payload rather than paid for.
+The freshness walk is filesystem metadata only — project-root discovery,
+index-dir mtimes, a bounded `.java`/`.kt` mtime count (`prime.py`
+`_staleness_since`), the watch daemon state file (`watch/paths.py`). Prime
+does open the Ladybug graph, dependency-light: `graph/ladybug_queries.py`
+imports neither LanceDB nor sentence-transformers, and the open buys exactly
+two reads — `graph.meta()` and `graph.microservice_counts()` (the service
+bullets). What is forbidden is the vector stack — torch,
+sentence_transformers, lancedb, pyarrow, cocoindex — pinned by the import-set
+test in `tests/package/test_jrag_prime.py`. The budget is unchanged by that
+concession; coverage counts that would require a store beyond those two reads
+are dropped from the payload rather than paid for.
 
 ### Surfaces
 
@@ -220,8 +225,9 @@ Deleted from the repo: `skills/explore-codebase/`, `skills/explore-codebase-cli/
 
 - prime: golden payloads (fresh / stale / unindexed-silent / daemon on-off);
   `--hook-json` envelope schema validity; an import-set guard proving the
-  prime path pulls no vector/Lance/graph-store modules (protects the latency
-  budget); empty stdout + exit 0 on soft states.
+  prime path pulls no vector-stack modules — torch, sentence_transformers,
+  lancedb, pyarrow, cocoindex (protects the latency budget); empty stdout +
+  exit 0 on soft states.
 - installer: hook merge idempotency (run twice → one entry), unrelated hooks
   preserved, unparseable settings → warn and skip without writing; `update`
   removes all four artifact files from a fixture mimicking a 0.12.x
@@ -232,12 +238,17 @@ Deleted from the repo: `skills/explore-codebase/`, `skills/explore-codebase-cli/
 
 ## Rollout
 
-Single release 0.13.0 carrying prime + hook wiring + artifact removal, tagged
-only after the Phase A gate passes. If the gate fails: 0.13.0 ships prime
-alone as opt-in, removal deferred, hypothesis recorded as falsified. Release
+The Phase A gate failed. P1 (the gate): revised-D capped 1/3 on call-trace +
+semantic vs A's 0/3. P2 directional fail: D mean tool calls 6.8 → 8.0, caps
+2/20 → 3/20. P3 held: blast-radius 0/2 caps, 7.0 = 7.0. Runs live in
+`bench/results/20260831T230727` (baseline) / `20260831T231733` (revised);
+prereg amendment 2026-08-31 in `bench/PREREGISTRATION.md`. Per that
+pre-committed rule, the branch ships prime + hook wiring + artifact removal
+anyway and 0.13.0 must not be tagged. Whether to defer the removal per this
+spec's original contingency is the PR review's call. If a release does happen,
 notes carry the breaking-change line (skills/agents removed; `jrag update`
-cleans up deployed copies). Dual PyPI publish (`jrag-cli` + `java-codebase-rag`,
-same version) per the publish-pip skill.
+cleans up deployed copies) and the dual PyPI publish (`jrag-cli` +
+`java-codebase-rag`, same version) per the publish-pip skill.
 
 ## Open Questions
 

@@ -5,7 +5,7 @@ This module provides the `install` subcommand that walks users through:
 2. Embedding model selection
 3. Agent host selection
 4. Scope selection (project/user)
-5. Artifact deployment (MCP config, skill, agent)
+5. Agent-surface wiring (SessionStart prime hook on 'cli', MCP server entry on 'mcp')
 6. YAML config generation and indexing
 """
 

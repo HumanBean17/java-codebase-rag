@@ -974,8 +974,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Interactive setup wizard: config, agent-surface registration, indexing.",
         description=(
             "Interactive setup wizard that guides users through: Java source detection, "
-            "embedding model selection, agent host configuration, artifact deployment, "
-            "and YAML config generation. Use --non-interactive for CI/automation."
+            "embedding model selection, agent host configuration, agent-surface wiring "
+            "(SessionStart prime hook on the cli surface, stdio MCP server entry on the "
+            "mcp surface — no skill/agent files deployed), and YAML config generation. "
+            "Use --non-interactive for CI/automation."
         ),
     )
     install.add_argument(

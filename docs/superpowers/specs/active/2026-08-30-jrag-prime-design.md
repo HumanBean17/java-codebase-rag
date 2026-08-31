@@ -181,7 +181,8 @@ from the payload rather than paid for.
   previously deployed artifact files wherever they exist in the scope
   (existing per-file removal + directory-cleanup machinery in `installer.py`),
   covering upgrades from any 0.12.x; handles surface switching both directions
-  (hook ⇄ MCP entry). The install marker grows a hook record.
+  (hook ⇄ MCP entry). The install marker records hook presence via its
+  existing per-host `surface` field (`mcp`|`cli`) — no new record shape.
 - `INSTALL_TARGETS`, `install_data` packaging, and `--surface` help text
   updated to the hook model.
 

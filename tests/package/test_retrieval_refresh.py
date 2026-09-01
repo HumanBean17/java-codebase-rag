@@ -362,3 +362,42 @@ def test_run_refresh_pipeline_vectors_mode_still_spawns_cocoindex(
     assert spawned, "cocoindex was never spawned (vectors phase skipped in vectors mode)"
     assert out.exit_code == 1
     assert out.phases_run == ["vectors"]
+
+
+def test_run_refresh_pipeline_vectors_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vectors mode + genuine cocoindex non-zero exit in the refresh pipeline
+    (the full ``jrag reprocess`` route): the bm25 remediation hint prints on
+    stderr alongside the failure — same hint as the CLI-owned failure sites."""
+    monkeypatch.setattr(server_mod, "vector_stack_installed", lambda: True)
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", str(tmp_path))
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_INDEX_DIR", str(tmp_path / "idx"))
+
+    on_path = tmp_path / "on_path" / "cocoindex"
+    on_path.parent.mkdir(parents=True)
+    on_path.write_text("")  # .is_file() True -> the not-found branch is skipped
+    monkeypatch.setattr(server_mod, "resolve_cocoindex_bin", lambda: on_path)
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.returncode = 1  # genuine failure, not a pre-spawn blocker
+
+        async def communicate(self):
+            return b"", b"cocoindex exit 1"
+
+    async def fake_exec(exe, *args, **kwargs):
+        return _FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        out = asyncio.run(server_mod.run_refresh_pipeline(quiet=True))
+    err = buf.getvalue()
+
+    assert out.success is False
+    assert out.exit_code == 1
+    assert out.message == "cocoindex exit 1"
+    assert RETRIEVAL_BM25_HINT in err

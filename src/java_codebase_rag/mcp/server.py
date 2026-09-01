@@ -17,6 +17,7 @@ from java_codebase_rag.cli_progress import (
     accumulate_and_relay_subprocess_streams,
 )
 from java_codebase_rag.pipeline import (
+    RETRIEVAL_BM25_HINT,
     VECTORS_SKIPPED_BM25,
     VECTORS_SKIPPED_GRAPH_ONLY,
     cocoindex_bin as resolve_cocoindex_bin,
@@ -638,6 +639,12 @@ async def run_refresh_pipeline(
     message: str | None = None
     if not ok:
         message = f"cocoindex exit {proc.returncode}"
+        # Remediation hint (suppressed when the mode is already bm25 — this
+        # branch is vectors-mode only, the guard keeps it honest on purpose).
+        # Full `jrag reprocess` routes here, so the hint matches the one on the
+        # CLI-owned failure sites (init/increment/reprocess --vectors-only).
+        if retrieval_mode_from_env() != "bm25":
+            print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
     elif graph_code is not None and graph_code != 0:
         message = f"graph builder exit {graph_code}"
     # Surface a post-flow optimize failure in the message too (success is not

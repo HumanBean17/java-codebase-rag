@@ -604,7 +604,7 @@ class SearchOutput(BaseModel):
     hints_structured: list[StructuredHint] = Field(default_factory=list, description=MCP_HINTS_STRUCTURED_FIELD_DESCRIPTION)
     lexical_mode: bool = Field(
         default=False,
-        description="True when results come from the graph-only lexical (keyword) backend instead of semantic/vector search.",
+        description="True when results come from the lexical (keyword) backend — graph-only installs or retrieval=bm25 — instead of semantic/vector search.",
     )
     absence: AbsenceDiagnosis | None = None
 

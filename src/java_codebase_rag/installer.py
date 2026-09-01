@@ -1206,7 +1206,12 @@ def run_init_if_needed(
         resolve_operator_config,
         write_config_source_pointer,
     )
-    from java_codebase_rag.pipeline import is_cocoindex_preflight_blocker, run_build_ast_graph, run_cocoindex_update
+    from java_codebase_rag.pipeline import (
+        VECTORS_SKIPPED_BM25,
+        is_cocoindex_preflight_blocker,
+        run_build_ast_graph,
+        run_cocoindex_update,
+    )
 
     has_existing, _ = index_dir_has_existing_artifacts(index_dir)
     if has_existing:
@@ -1237,31 +1242,43 @@ def run_init_if_needed(
         renderer.start()
     index_ok = True
     try:
-        coco = run_cocoindex_update(
-            env,
-            full_reprocess=False,
-            quiet=quiet,
-            verbose=verbose,
-            on_progress=on_progress,
-            on_progress_console=on_progress_console,
-        )
-        # Graph-only install (cocoindex absent, e.g. macOS Intel): skip the vectors phase
-        # and build the graph rather than failing install. A genuine non-zero cocoindex
-        # exit still fails.
-        vectors_skipped = is_cocoindex_preflight_blocker(coco)
-        if coco.returncode != 0 and not vectors_skipped:
-            print(
-                f"Error: CocoIndex update failed with code {coco.returncode}",
-                file=sys.stderr,
-            )
-            index_ok = False
+        # bm25 retrieval: there are no vectors to build, so cocoindex is never
+        # spawned (no cocoindex progress event either, so the renderer's vectors
+        # task stays unspawned instead of hanging at running). Same graph-only
+        # proceed as the stack-absent branch below.
+        bm25_mode = cfg.retrieval == "bm25"
+        vectors_skipped = bm25_mode
+        coco_failed = False
+        if bm25_mode:
+            print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
         else:
-            if vectors_skipped:
+            coco = run_cocoindex_update(
+                env,
+                full_reprocess=False,
+                quiet=quiet,
+                verbose=verbose,
+                on_progress=on_progress,
+                on_progress_console=on_progress_console,
+            )
+            # Graph-only install (cocoindex absent, e.g. macOS Intel): skip the vectors
+            # phase and build the graph rather than failing install. A genuine
+            # non-zero cocoindex exit still fails.
+            vectors_skipped = is_cocoindex_preflight_blocker(coco)
+            coco_failed = coco.returncode != 0 and not vectors_skipped
+            if coco_failed:
+                print(
+                    f"Error: CocoIndex update failed with code {coco.returncode}",
+                    file=sys.stderr,
+                )
+            elif vectors_skipped:
                 print(
                     "jrag: vectors skipped — vector stack not installed on this "
                     "platform (graph-only mode). Building graph only; semantic search is unavailable.",
                     file=sys.stderr,
                 )
+        if coco_failed:
+            index_ok = False
+        else:
             g = run_build_ast_graph(
                 source_root=cfg.source_root,
                 ladybug_path=cfg.ladybug_path,
@@ -2029,7 +2046,12 @@ def run_update(
         resolve_operator_config,
         write_config_source_pointer,
     )
-    from java_codebase_rag.pipeline import is_cocoindex_preflight_blocker, run_cocoindex_update, run_incremental_graph
+    from java_codebase_rag.pipeline import (
+        VECTORS_SKIPPED_BM25,
+        is_cocoindex_preflight_blocker,
+        run_cocoindex_update,
+        run_incremental_graph,
+    )
 
     project_root = discover_project_root(cwd)
     if project_root is None:
@@ -2084,30 +2106,42 @@ def run_update(
             renderer.start()
         index_ok = True
         try:
-            coco = run_cocoindex_update(
-                env,
-                full_reprocess=False,
-                quiet=quiet,
-                verbose=verbose,
-                on_progress=on_progress,
-                on_progress_console=on_progress_console,
-            )
-            # Graph-only install (cocoindex absent): skip the vectors catch-up and run the
-            # graph catch-up only. A genuine non-zero cocoindex exit still fails.
-            vectors_skipped = is_cocoindex_preflight_blocker(coco)
-            if coco.returncode != 0 and not vectors_skipped:
-                print(
-                    f"Error: Lance index update failed with code {coco.returncode}",
-                    file=sys.stderr,
-                )
-                index_ok = False
+            # bm25 retrieval: there are no vectors to build, so cocoindex is never
+            # spawned (no cocoindex progress event either, so the renderer's vectors
+            # task stays unspawned instead of hanging at running). Same graph-only
+            # catch-up as the stack-absent branch below.
+            bm25_mode = cfg.retrieval == "bm25"
+            vectors_skipped = bm25_mode
+            coco_failed = False
+            if bm25_mode:
+                print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
             else:
-                if vectors_skipped:
+                coco = run_cocoindex_update(
+                    env,
+                    full_reprocess=False,
+                    quiet=quiet,
+                    verbose=verbose,
+                    on_progress=on_progress,
+                    on_progress_console=on_progress_console,
+                )
+                # Graph-only install (cocoindex absent): skip the vectors catch-up and run
+                # the graph catch-up only. A genuine non-zero cocoindex exit still fails.
+                vectors_skipped = is_cocoindex_preflight_blocker(coco)
+                coco_failed = coco.returncode != 0 and not vectors_skipped
+                if coco_failed:
+                    print(
+                        f"Error: Lance index update failed with code {coco.returncode}",
+                        file=sys.stderr,
+                    )
+                elif vectors_skipped:
                     print(
                         "jrag: vectors skipped — vector stack not installed on this "
                         "platform (graph-only mode). Running graph catch-up only.",
                         file=sys.stderr,
                     )
+            if coco_failed:
+                index_ok = False
+            else:
                 g = run_incremental_graph(
                     source_root=cfg.source_root,
                     ladybug_path=cfg.ladybug_path,

@@ -16,7 +16,8 @@ Lifecycle (``run_foreground``):
   1. Acquire the project lock. Held elsewhere -> stderr line + ``return 2``.
      Unsupported platform -> stderr line + ``return 2``.
   2. EAGERLY warm the embedding model — but ONLY when the vector stack is
-     installed — so a load failure fails fast (stderr + ``on_event("error", …)``
+     installed and retrieval is vectors — so a load failure fails fast (stderr +
+     ``on_event("error", …)``
      + lock release + ``return 2``). On graph-only installs (macOS Intel: PEP
      508 excludes sentence_transformers/lancedb) this step is skipped and the
      daemon serves warm lexical/graph-only search instead; the read path
@@ -80,10 +81,12 @@ class WatchDaemon:
 
     def __init__(self, cfg: "ResolvedOperatorConfig") -> None:
         self.cfg = cfg
-        # Probed once (cheap: 3x importlib.util.find_spec). When False (graph-only
-        # install — macOS Intel), the daemon skips the embedding-model warm-up and
-        # the cocoindex vectors reindex; the read path degrades to lexical on its own.
-        self._vector_enabled = vector_stack_installed()
+        # Probed once (cheap: 3x importlib.util.find_spec) + the operator's
+        # retrieval choice. When False — the vector stack is absent (graph-only
+        # install, macOS Intel) OR retrieval=bm25 — the daemon skips the
+        # embedding-model warm-up and the cocoindex vectors reindex; the read path
+        # degrades to lexical on its own.
+        self._vector_enabled = vector_stack_installed() and cfg.retrieval == "vectors"
         self.lock = ProjectLock(cfg.index_dir)
         self.warm = WarmResources(cfg)
         self.server = WatchServer(self.warm, cfg)
@@ -103,12 +106,14 @@ class WatchDaemon:
             "started_at": None,
             "pid": None,
             "socket": str(paths.socket_path(cfg.index_dir)),
-            # Display label derived from the install-time probe above, NOT a live
-            # search-capability check — the read path's actual lexical/vector choice
-            # is mcp_v2's (``_ensure_vector_backend``). The two agree under the PEP
-            # 508 markers (the vector trio is present or absent together). Surfaced
-            # in the status panel and ``jrag watch --status``; omitted from display
-            # on the normal (vector) path to avoid noise.
+            # Display label derived from the install-time probe above (stack
+            # absent OR retrieval=bm25), NOT a live search-capability check — the
+            # read path's actual lexical/vector choice is mcp_v2's
+            # (``_ensure_vector_backend``). The two agree under the PEP 508
+            # markers (the vector trio is present or absent together) and under a
+            # bm25 choice (nothing to embed). Surfaced in the status panel and
+            # ``jrag watch --status``; omitted from display on the normal (vector)
+            # path to avoid noise.
             "mode": "lexical" if not self._vector_enabled else "vector",
             "last_reindex_at": None,
             "last_reindex_kind": None,
@@ -146,11 +151,12 @@ class WatchDaemon:
 
         # 2. Eagerly warm the embedding model so a load failure fails fast (before
         #    the server accepts a single query) — but ONLY when the vector stack is
-        #    installed. The model is the only heavy, failure-prone resource that is
-        #    not lazy on the read path. On a graph-only install (macOS Intel) there
-        #    is no vector stack to warm; the daemon serves lexical/graph-only search
-        #    and ``mcp_v2.search_v2`` degrades on its own, so we skip straight to
-        #    serving rather than failing on a missing ``sentence_transformers``.
+        #    installed AND retrieval is vectors. The model is the only heavy,
+        #    failure-prone resource that is not lazy on the read path. When it is
+        #    skipped — the stack is absent (graph-only install, macOS Intel) or the
+        #    operator chose bm25 — the daemon serves lexical/graph-only search and
+        #    ``mcp_v2.search_v2`` degrades on its own, so we skip straight to serving
+        #    rather than failing on a missing ``sentence_transformers``.
         if self._vector_enabled:
             try:
                 self.warm.model()
@@ -159,6 +165,15 @@ class WatchDaemon:
                 self._record("error", {"phase": "model_load", "error": repr(exc)})
                 self.lock.release()
                 return 2
+        elif vector_stack_installed():
+            # _vector_enabled is False by operator choice, not platform: the stack
+            # is present but retrieval=bm25, so there is no model to warm. The
+            # stack probe is re-evaluated here to keep the two skip reasons
+            # distinguishable in the operator-facing line below.
+            print(
+                "jrag watch: retrieval mode is bm25 — serving lexical search",
+                file=sys.stderr,
+            )
         else:
             print(
                 "jrag watch: vector stack unavailable — serving lexical (graph-only) search",

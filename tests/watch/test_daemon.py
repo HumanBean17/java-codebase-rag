@@ -606,6 +606,164 @@ def test_foreground_graph_only_starts_without_vectors(tmp_path, monkeypatch):
 
 
 # ===========================================================================
+# (g) retrieval=bm25 with the stack PRESENT: lexical mode by operator choice
+# ===========================================================================
+
+
+def _write_retrieval_yaml(source_root: Path, retrieval: str) -> None:
+    """Write a one-key project YAML so cfg resolution picks up the mode."""
+    (source_root / ".java-codebase-rag.yml").write_text(
+        f"retrieval: {retrieval}\n", encoding="utf-8"
+    )
+
+
+def test_daemon_bm25_probe_disables_vectors_and_labels_lexical(tmp_path, monkeypatch):
+    """``retrieval: bm25`` with the vector stack installed: the compound probe
+    (stack present AND retrieval vectors) makes ``_vector_enabled`` False by
+    operator choice, so the state file's display label reads ``lexical`` via the
+    existing label logic alone — no separate bm25 label — and constructing the
+    daemon never warms the embedding model (there is nothing to embed)."""
+    from java_codebase_rag.config import resolve_operator_config
+    from java_codebase_rag.watch import daemon as daemon_mod
+
+    index_dir, source_root = _index_source(tmp_path, tag="bm25idx")
+    _anchor_env(monkeypatch, index_dir, source_root)
+    _write_retrieval_yaml(source_root, "bm25")
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+
+    monkeypatch.setattr(daemon_mod, "vector_stack_installed", lambda: True)
+
+    class _RaisingModelWarm:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def model(self):
+            raise AssertionError("warm.model() must not be called under retrieval=bm25")
+
+        def graph(self):
+            return None
+
+        def begin_graph_snapshot(self):
+            pass
+
+        def commit_graph_snapshot(self):
+            pass
+
+    monkeypatch.setattr(daemon_mod, "WarmResources", _RaisingModelWarm)
+
+    cfg = resolve_operator_config(source_root=None, cli_index_dir=str(index_dir))
+    d = daemon_mod.WatchDaemon(cfg)
+
+    assert d._vector_enabled is False
+    assert d._state["mode"] == "lexical"
+    _cleanup_runtime(index_dir)
+
+
+_BM25_STUB_SCRIPT = '''\
+"""bm25 stub watch daemon: vector stack PRESENT, retrieval=bm25.
+
+Patches ``daemon.vector_stack_installed`` -> True (so a skip can only come from
+the retrieval mode), swaps in a WarmResources whose ``model()`` RAISES (proving
+``run_foreground`` never warms the model under bm25), fakes SourceWatcher, then
+runs the REAL ``run_foreground``. If the gating regresses (model() called), the
+AssertionError surfaces as "failed to load embedding model" -> exit 2 -> the
+daemon never comes up -> the test fails fast. The bm25 mode is taken from the
+``retrieval: bm25`` YAML in the anchored source root.
+"""
+import os
+import sys
+
+from java_codebase_rag.config import resolve_operator_config
+from java_codebase_rag.watch import daemon
+
+
+class _RaisingModelWarm:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def model(self):
+        raise AssertionError("warm.model() must not be called under retrieval=bm25")
+
+    def graph(self):
+        return None
+
+    def begin_graph_snapshot(self):
+        pass
+
+    def commit_graph_snapshot(self):
+        pass
+
+
+class _FakeWatcher:
+    def __init__(self, cfg, warm, *, debounce_ms, backend, poll_interval_ms, on_event=None):
+        pass
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+# Stack present: any vectors skip must come from the operator's retrieval choice.
+daemon.vector_stack_installed = lambda: True
+daemon.WarmResources = _RaisingModelWarm
+daemon.SourceWatcher = _FakeWatcher
+
+cfg = resolve_operator_config(source_root=None, cli_index_dir=os.environ["JRAG_WATCH_TEST_INDEX"])
+daemon.WatchDaemon(cfg).run_foreground()
+sys.exit(0)  # pragma: no cover - run_foreground ends with os._exit(0)
+'''
+
+
+def test_foreground_bm25_starts_without_vectors_and_says_so(tmp_path, monkeypatch):
+    """Under ``retrieval: bm25`` (stack present) the daemon skips the model
+    warm-up and reaches serving with ``mode='lexical'`` — and the warm-up skip
+    line names the retrieval mode, NOT the stack-absent reason (the two skip
+    causes must stay distinguishable to the operator)."""
+    index_dir, source_root = _index_source(tmp_path, tag="bm25fg")
+    _anchor_env(monkeypatch, index_dir, source_root)
+    _write_retrieval_yaml(source_root, "bm25")
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+
+    script = tmp_path / "bm25_stub.py"
+    script.write_text(_BM25_STUB_SCRIPT)
+    log_path = tmp_path / "bm25.log"
+    proc = _spawn_stub(script, index_dir, source_root, log_path=log_path)
+    try:
+        # A gating regression makes the stub's model() raise -> exit 2 -> the
+        # process dies at once, so poll for early exit and surface the log tail.
+        came_up = False
+        deadline = time.monotonic() + _STUB_READY_S
+        while time.monotonic() < deadline:
+            if is_daemon_alive(index_dir):
+                came_up = True
+                break
+            if proc.poll() is not None:
+                _fail_with_log(
+                    log_path,
+                    f"bm25 daemon exited early (rc={proc.returncode}) — "
+                    "warm.model() was not skipped",
+                )
+            time.sleep(0.1)
+        if not came_up:
+            _fail_with_log(log_path, f"bm25 daemon did not come up in {_STUB_READY_S}s")
+
+        state = _wait_state(index_dir)
+        assert state.get("mode") == "lexical", f"expected mode='lexical', got {state.get('mode')!r}"
+        assert state["pid"] == proc.pid
+        log = log_path.read_text(errors="replace") if log_path.exists() else ""
+        assert "retrieval mode is bm25 — serving lexical search" in log, (
+            f"bm25 warm-up skip line missing from daemon stderr: {log!r}"
+        )
+        assert "vector stack unavailable" not in log, (
+            f"stack-absent wording printed on a stack-present bm25 daemon: {log!r}"
+        )
+    finally:
+        _stop_proc(proc, index_dir)
+
+
+# ===========================================================================
 # GOLDEN IPC TEST (heavy) — jrag search over the socket == cold path, byte for byte
 # ===========================================================================
 

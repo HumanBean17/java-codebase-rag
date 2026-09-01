@@ -28,7 +28,7 @@ import pytest
 from java_codebase_rag import installer as installer_mod
 from java_codebase_rag.config import YAML_CONFIG_FILENAMES
 from java_codebase_rag.mcp import server as server_mod
-from java_codebase_rag.pipeline import VECTORS_SKIPPED_BM25
+from java_codebase_rag.pipeline import RETRIEVAL_BM25_HINT, VECTORS_SKIPPED_BM25
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,8 @@ def _install_index_stubs(
     """Stub the pipeline runners at the ``pipeline`` module seam.
 
     ``coco="forbid"`` makes any ``run_cocoindex_update`` call fail the test;
-    ``coco="fake"`` counts the call and returns a successful stub (vectors mode).
+    ``coco="fake"`` counts the call and returns a successful stub (vectors mode);
+    ``coco="fail"`` counts the call and returns a non-zero (genuine failure) stub.
     """
 
     def coco_forbidden(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
@@ -77,6 +78,14 @@ def _install_index_stubs(
         calls["coco"] += 1
         return _stub_completed()
 
+    def coco_fail(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        calls["coco"] += 1
+        # Non-zero exit with a full command list: a genuine cocoindex failure,
+        # not a preflight blocker (those carry returncode 126/127 + short args).
+        return subprocess.CompletedProcess(
+            args=["stub", "cmd"], returncode=1, stdout="", stderr="cocoindex boom"
+        )
+
     def fake_graph(**_k: object) -> subprocess.CompletedProcess[str]:
         calls["graph"] += 1
         return _stub_completed()
@@ -85,10 +94,8 @@ def _install_index_stubs(
         calls["incremental_graph"] += 1
         return _stub_completed()
 
-    monkeypatch.setattr(
-        "java_codebase_rag.pipeline.run_cocoindex_update",
-        coco_forbidden if coco == "forbid" else coco_fake,
-    )
+    coco_impl = {"forbid": coco_forbidden, "fake": coco_fake, "fail": coco_fail}[coco]
+    monkeypatch.setattr("java_codebase_rag.pipeline.run_cocoindex_update", coco_impl)
     monkeypatch.setattr("java_codebase_rag.pipeline.run_build_ast_graph", fake_graph)
     monkeypatch.setattr("java_codebase_rag.pipeline.run_incremental_graph", fake_incremental_graph)
 
@@ -152,6 +159,32 @@ def test_run_init_if_needed_vectors_mode_still_runs_cocoindex(
     assert calls["coco"] == 1
     assert calls["graph"] == 1
     assert VECTORS_SKIPPED_BM25 not in capsys.readouterr().err
+
+
+def test_run_init_if_needed_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A genuine cocoindex failure in the install indexing sub-step returns False
+    (issue #351 semantics unchanged) and prints the bm25 remediation hint on
+    stderr after the existing error line."""
+    _write_retrieval_yaml(tmp_path, "vectors")
+    calls = _calls()
+    _install_index_stubs(monkeypatch, calls, coco="fail")
+
+    ok = installer_mod.run_init_if_needed(
+        tmp_path,
+        tmp_path / ".java-codebase-rag",
+        "auto",
+        non_interactive=True,
+        quiet=True,
+        verbose=False,
+    )
+
+    assert ok is False
+    assert calls["coco"] == 1
+    captured = capsys.readouterr()
+    assert "Error: CocoIndex update failed with code 1" in captured.err
+    assert RETRIEVAL_BM25_HINT in captured.err
 
 
 # --- installer: run_update ----------------------------------------------------
@@ -228,6 +261,28 @@ def test_run_update_vectors_mode_still_runs_cocoindex(
     assert rc == 0
     assert calls["coco"] == 1
     assert calls["incremental_graph"] == 1
+
+
+def test_run_update_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A genuine cocoindex failure in the update indexing sub-step exits 1 and
+    prints the bm25 remediation hint on stderr after the existing error line."""
+    _write_retrieval_yaml(tmp_path, "vectors")
+    index_dir = tmp_path / ".java-codebase-rag"
+    index_dir.mkdir()
+    (index_dir / "code_graph.lbug").write_text("", encoding="utf-8")
+    _install_update_artifact_stubs(monkeypatch, tmp_path)
+    calls = _calls()
+    _install_index_stubs(monkeypatch, calls, coco="fail")
+    monkeypatch.chdir(tmp_path)
+
+    rc = installer_mod.run_update(force=False, dry_run=False, cwd=tmp_path)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Error: Lance index update failed with code 1" in captured.err
+    assert RETRIEVAL_BM25_HINT in captured.err
 
 
 # --- MCP reprocess: run_refresh_pipeline --------------------------------------

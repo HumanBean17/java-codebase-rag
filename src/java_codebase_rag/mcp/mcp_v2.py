@@ -1033,7 +1033,26 @@ def search_v2(
                 )
             model_name = resolved_sbert_model_for_process_env(SBERT_MODEL)
             device = os.environ.get("SBERT_DEVICE") or None
-            model = _get_sentence_transformer(model_name, device)
+            try:
+                model = _get_sentence_transformer(model_name, device)
+            except Exception as exc:
+                # The embedding-model load is the one vector-path dependency that
+                # fails for offline operators (model download blocked). Give that
+                # failure class a dedicated envelope naming the bm25 escape hatch
+                # (same advice as pipeline.RETRIEVAL_BM25_HINT, inlined because
+                # this surface returns the message instead of printing it). All
+                # other exceptions keep the generic outer handler below.
+                return SearchOutput(
+                    success=False,
+                    message=(
+                        f"embedding model load failed: {exc}. Switch to keyword search: "
+                        "re-run jrag install and choose bm25, or set "
+                        "JAVA_CODEBASE_RAG_RETRIEVAL=bm25."
+                    ),
+                    advisories=[],
+                    limit=None,
+                    offset=None,
+                )
             uri = os.environ.get("JAVA_CODEBASE_RAG_INDEX_DIR", "").strip() or str(
                 (Path.cwd() / ".java-codebase-rag").resolve()
             )

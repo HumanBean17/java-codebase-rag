@@ -20,7 +20,7 @@ import pytest
 
 from java_codebase_rag import cli as cli_mod
 from java_codebase_rag.config import YAML_CONFIG_FILENAMES
-from java_codebase_rag.pipeline import VECTORS_SKIPPED_BM25
+from java_codebase_rag.pipeline import RETRIEVAL_BM25_HINT, VECTORS_SKIPPED_BM25
 
 
 @pytest.fixture(autouse=True)
@@ -42,13 +42,23 @@ def _stub_completed() -> subprocess.CompletedProcess[str]:
     )
 
 
+def _stub_failed() -> subprocess.CompletedProcess[str]:
+    # A genuine cocoindex failure: non-zero exit with a full command list, so the
+    # preflight-blocker detector (returncode 126/127 + args length <= 1) classifies
+    # it as a real run that failed — the branch the bm25 hint hangs off.
+    return subprocess.CompletedProcess(
+        args=["stub", "cmd"], returncode=1, stdout="", stderr="cocoindex boom"
+    )
+
+
 def _install_stubs(
     monkeypatch: pytest.MonkeyPatch, calls: dict[str, int], *, coco: str
 ) -> None:
     """Stub the pipeline helpers at the ``cli`` module seam.
 
     ``coco="forbid"`` makes any ``run_cocoindex_update`` call fail the test;
-    ``coco="fake"`` counts the call and returns a successful stub (vectors mode).
+    ``coco="fake"`` counts the call and returns a successful stub (vectors mode);
+    ``coco="fail"`` counts the call and returns a non-zero (genuine failure) stub.
     """
 
     def coco_forbidden(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
@@ -58,6 +68,10 @@ def _install_stubs(
         calls["coco"] += 1
         return _stub_completed()
 
+    def coco_fail(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        calls["coco"] += 1
+        return _stub_failed()
+
     def fake_graph(**_k: object) -> subprocess.CompletedProcess[str]:
         calls["graph"] += 1
         return _stub_completed()
@@ -66,9 +80,8 @@ def _install_stubs(
         calls["incremental_graph"] += 1
         return _stub_completed()
 
-    monkeypatch.setattr(
-        cli_mod, "run_cocoindex_update", coco_forbidden if coco == "forbid" else coco_fake
-    )
+    coco_impl = {"forbid": coco_forbidden, "fake": coco_fake, "fail": coco_fail}[coco]
+    monkeypatch.setattr(cli_mod, "run_cocoindex_update", coco_impl)
     monkeypatch.setattr(cli_mod, "run_build_ast_graph", fake_graph)
     monkeypatch.setattr(cli_mod, "run_incremental_graph", fake_incremental_graph)
     # Bypass the progress renderer: run work() directly with no PipelineProgress.
@@ -225,3 +238,84 @@ def test_reprocess_bm25_full_is_graph_only_rebuild(
         ),
     }
     assert VECTORS_SKIPPED_BM25 in captured.err
+
+
+# --- vectors-phase failure → bm25 remediation hint ----------------------------
+
+
+def test_init_vectors_mode_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A genuine cocoindex failure (non-zero exit, not a preflight blocker) under
+    vectors mode exits 1 and prints the bm25 remediation hint on stderr right
+    after the failure payload — the operator's offline escape hatch."""
+    _write_retrieval_yaml(tmp_path, "vectors")
+    calls = _calls()
+    _install_stubs(monkeypatch, calls, coco="fail")
+
+    rc = cli_mod._cmd_init(_ns(tmp_path, tmp_path / "idx"))
+
+    assert rc == 1
+    assert calls["coco"] == 1
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["success"] is False
+    assert payload["message"] == "cocoindex exit 1"
+    assert RETRIEVAL_BM25_HINT in captured.err
+
+
+def test_increment_vectors_mode_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Same remediation hint on the increment cocoindex failure path."""
+    _write_retrieval_yaml(tmp_path, "vectors")
+    calls = _calls()
+    _install_stubs(monkeypatch, calls, coco="fail")
+
+    rc = cli_mod._cmd_increment(_ns(tmp_path, tmp_path / "idx"))
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["success"] is False
+    assert RETRIEVAL_BM25_HINT in captured.err
+
+
+def test_reprocess_vectors_only_cocoindex_failure_hints_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Same remediation hint on reprocess's vectors-phase failure block (the
+    ``--vectors-only`` cocoindex run — the CLI-owned cocoindex failure payload
+    in reprocess)."""
+    _write_retrieval_yaml(tmp_path, "vectors")
+    calls = _calls()
+    _install_stubs(monkeypatch, calls, coco="fail")
+
+    rc = cli_mod._cmd_reprocess(_ns(tmp_path, tmp_path / "idx", vectors_only=True))
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["success"] is False
+    assert RETRIEVAL_BM25_HINT in captured.err
+
+
+def test_bm25_mode_never_emits_bm25_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Control: under bm25 no lifecycle command reaches cocoindex at all, so the
+    bm25 remediation hint never appears on any path (telling a bm25 operator to
+    switch to bm25 would be noise)."""
+    _write_retrieval_yaml(tmp_path, "bm25")
+    calls = _calls()
+    _install_stubs(monkeypatch, calls, coco="forbid")
+
+    for cmd, ns_overrides in (
+        (cli_mod._cmd_init, {}),
+        (cli_mod._cmd_increment, {}),
+        (cli_mod._cmd_increment, {"vectors_only": True}),
+        (cli_mod._cmd_reprocess, {"vectors_only": True}),
+        (cli_mod._cmd_reprocess, {}),
+    ):
+        assert cmd(_ns(tmp_path, tmp_path / "idx", **ns_overrides)) == 0
+
+    captured = capsys.readouterr()
+    assert RETRIEVAL_BM25_HINT not in captured.err

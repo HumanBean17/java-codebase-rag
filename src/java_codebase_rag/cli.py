@@ -22,11 +22,13 @@ from java_codebase_rag.config import (
     emit_legacy_yaml_hint_if_needed,
     index_dir_has_existing_artifacts,
     resolve_operator_config,
+    retrieval_mode_from_env,
     write_config_source_pointer,
 )
 from java_codebase_rag._fdlimit import raise_fd_limit
 from java_codebase_rag._version import version_string
 from java_codebase_rag.pipeline import (
+    RETRIEVAL_BM25_HINT as _RETRIEVAL_BM25_HINT,
     VECTORS_SKIPPED_BM25 as _VECTORS_SKIPPED_BM25,
     VECTORS_SKIPPED_GRAPH_ONLY as _VECTORS_SKIPPED_GRAPH_ONLY,
     clip,
@@ -402,6 +404,10 @@ def _cmd_init(args: argparse.Namespace) -> int:
                         "message": f"cocoindex exit {coco.returncode}",
                     }
                 )
+                # Remediation hint (suppressed when the mode is already bm25 —
+                # the guard is unreachable here today, kept honest on purpose).
+                if retrieval_mode_from_env() != "bm25":
+                    print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
                 return 1
             if vectors_skipped:
                 print(_VECTORS_SKIPPED_GRAPH_ONLY, file=sys.stderr, flush=True)
@@ -480,6 +486,8 @@ def _cmd_increment(args: argparse.Namespace) -> int:
                         "message": f"cocoindex exit {coco.returncode}",
                     }
                 )
+                if retrieval_mode_from_env() != "bm25":
+                    print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
                 return 1
             if vectors_skipped:
                 print(_VECTORS_SKIPPED_GRAPH_ONLY, file=sys.stderr, flush=True)
@@ -622,6 +630,8 @@ def _cmd_reprocess(args: argparse.Namespace) -> int:
             if ok:
                 print(_REPROCESS_DRIFT_VECTORS_ONLY, file=sys.stderr)
             _emit_reprocess_outcome(payload, selective_tty_mode="vectors" if ok else None)
+            if not ok and retrieval_mode_from_env() != "bm25":
+                print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
             return _reprocess_exit_code(payload)
 
         if graph_only or bm25_mode:

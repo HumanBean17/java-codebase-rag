@@ -323,6 +323,49 @@ def test_search_retrieval_bm25_leaves_run_search_unloaded(monkeypatch, ladybug_g
     )
 
 
+def test_search_model_load_failure_returns_bm25_hint_envelope(monkeypatch, ladybug_graph) -> None:
+    """An exception from the embedding-model load (offline operator, download
+    blocked) returns a dedicated failure envelope naming the bm25 escape hatch —
+    bypassing the generic str(exc) outer handler for this failure class only."""
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+    monkeypatch.setattr(
+        "java_codebase_rag.mcp.mcp_v2.run_search", lambda *args, **kwargs: _fake_search_rows()
+    )
+
+    def boom(model_name, device):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(mcp_v2, "_get_sentence_transformer", boom)
+
+    out = search_v2("ChatService", graph=ladybug_graph)
+
+    assert out.success is False
+    assert out.message is not None
+    assert out.message.startswith("embedding model load failed:")
+    assert "no network" in out.message
+    assert "JAVA_CODEBASE_RAG_RETRIEVAL=bm25" in out.message
+    assert out.advisories == []
+
+
+def test_search_post_model_failure_keeps_plain_envelope(monkeypatch, ladybug_graph) -> None:
+    """Control: a failure AFTER the model load (run_search itself raising) keeps
+    today's plain ``str(exc)`` outer envelope — no wrapper text, no bm25 hint."""
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+    monkeypatch.setattr(
+        mcp_v2, "_get_sentence_transformer", lambda model_name, device: object()
+    )
+
+    def fake_run_search(query, **kwargs):
+        raise RuntimeError("Some other LanceDB error")
+
+    monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
+
+    out = search_v2("query", table="java", graph=ladybug_graph)
+
+    assert out.success is False
+    assert out.message == "Some other LanceDB error"
+
+
 def test_find_symbol_by_role(ladybug_graph) -> None:
     out = find_v2("symbol", {"role": "CONTROLLER"}, graph=ladybug_graph)
     assert out.success is True

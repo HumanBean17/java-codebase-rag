@@ -1204,9 +1204,11 @@ def run_init_if_needed(
     from java_codebase_rag.config import (
         index_dir_has_existing_artifacts,
         resolve_operator_config,
+        retrieval_mode_from_env,
         write_config_source_pointer,
     )
     from java_codebase_rag.pipeline import (
+        RETRIEVAL_BM25_HINT,
         VECTORS_SKIPPED_BM25,
         is_cocoindex_preflight_blocker,
         run_build_ast_graph,
@@ -1270,6 +1272,10 @@ def run_init_if_needed(
                     f"Error: CocoIndex update failed with code {coco.returncode}",
                     file=sys.stderr,
                 )
+                # Remediation hint (suppressed when the mode is already bm25 —
+                # the guard is unreachable here today, kept honest on purpose).
+                if retrieval_mode_from_env() != "bm25":
+                    print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
             elif vectors_skipped:
                 print(
                     "jrag: vectors skipped — vector stack not installed on this "
@@ -2044,9 +2050,11 @@ def run_update(
         discover_project_root,
         index_dir_has_existing_artifacts,
         resolve_operator_config,
+        retrieval_mode_from_env,
         write_config_source_pointer,
     )
     from java_codebase_rag.pipeline import (
+        RETRIEVAL_BM25_HINT,
         VECTORS_SKIPPED_BM25,
         is_cocoindex_preflight_blocker,
         run_cocoindex_update,
@@ -2133,6 +2141,8 @@ def run_update(
                         f"Error: Lance index update failed with code {coco.returncode}",
                         file=sys.stderr,
                     )
+                    if retrieval_mode_from_env() != "bm25":
+                        print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
                 elif vectors_skipped:
                     print(
                         "jrag: vectors skipped — vector stack not installed on this "

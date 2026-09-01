@@ -37,6 +37,7 @@ import pytest
 import java_codebase_rag.jrag as jrag_mod
 import java_codebase_rag.watch.client as client_mod
 from java_codebase_rag.jrag import main as jrag_main
+from java_codebase_rag.pipeline import RETRIEVAL_BM25_HINT
 from java_codebase_rag.watch import paths
 from java_codebase_rag.watch.client import is_daemon_alive
 from java_codebase_rag.watch.lock import ProjectLock
@@ -758,6 +759,93 @@ def test_foreground_bm25_starts_without_vectors_and_says_so(tmp_path, monkeypatc
         )
         assert "vector stack unavailable" not in log, (
             f"stack-absent wording printed on a stack-present bm25 daemon: {log!r}"
+        )
+    finally:
+        _stop_proc(proc, index_dir)
+
+
+# ===========================================================================
+# (h) warm-up failure (vectors mode): failure line + bm25 remediation hint
+# ===========================================================================
+
+
+_MODEL_FAIL_STUB_SCRIPT = '''\
+"""Warm-failure stub watch daemon: stack present, retrieval vectors, model RAISES.
+
+Patches ``daemon.vector_stack_installed`` -> True and ``retrieval: vectors`` (via
+the anchored source root's YAML) so ``_vector_enabled`` is True, swaps in a
+WarmResources whose ``model()`` raises RuntimeError (simulating an operator who
+cannot download the embedding model), then runs the REAL ``run_foreground`` —
+which must fail fast with the model-load line AND the bm25 remediation hint on
+stderr, release the lock, and exit 2.
+"""
+import os
+import sys
+
+from java_codebase_rag.config import resolve_operator_config
+from java_codebase_rag.watch import daemon
+
+
+class _ModelLoadFailWarm:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def model(self):
+        raise RuntimeError("no network")
+
+    def graph(self):
+        return None
+
+    def begin_graph_snapshot(self):
+        pass
+
+    def commit_graph_snapshot(self):
+        pass
+
+
+class _FakeWatcher:
+    def __init__(self, cfg, warm, *, debounce_ms, backend, poll_interval_ms, on_event=None):
+        pass
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+# Stack present + retrieval vectors: the daemon must warm the model — and fail.
+daemon.vector_stack_installed = lambda: True
+daemon.WarmResources = _ModelLoadFailWarm
+daemon.SourceWatcher = _FakeWatcher
+
+cfg = resolve_operator_config(source_root=None, cli_index_dir=os.environ["JRAG_WATCH_TEST_INDEX"])
+sys.exit(daemon.WatchDaemon(cfg).run_foreground())
+'''
+
+
+def test_foreground_model_load_failure_prints_bm25_hint(tmp_path, monkeypatch):
+    """Vectors-mode warm-up failure: the daemon prints the model-load failure
+    line followed by the bm25 remediation hint, then exits 2 (fail fast, lock
+    released — existing behavior unchanged apart from the added hint)."""
+    index_dir, source_root = _index_source(tmp_path, tag="modfail")
+    _anchor_env(monkeypatch, index_dir, source_root)
+    _write_retrieval_yaml(source_root, "vectors")
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+
+    script = tmp_path / "model_fail_stub.py"
+    script.write_text(_MODEL_FAIL_STUB_SCRIPT)
+    log_path = tmp_path / "model_fail.log"
+    proc = _spawn_stub(script, index_dir, source_root, log_path=log_path)
+    try:
+        rc = _wait_dead(proc, timeout=_STUB_READY_S)
+        log = log_path.read_text(errors="replace") if log_path.exists() else ""
+        assert rc == 2, f"warm failure must exit 2, got {rc}; log:\n{log!r}"
+        assert "failed to load embedding model" in log, (
+            f"model-load failure line missing from daemon stderr: {log!r}"
+        )
+        assert RETRIEVAL_BM25_HINT in log, (
+            f"bm25 remediation hint missing from daemon stderr: {log!r}"
         )
     finally:
         _stop_proc(proc, index_dir)

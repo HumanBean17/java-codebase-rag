@@ -277,6 +277,45 @@ def test_run_install_graph_only_platform_forces_bm25(tmp_path, monkeypatch, caps
     ), "the existing graph-only skip message must keep printing verbatim"
 
 
+def _capture_init_retrieval(monkeypatch) -> dict:
+    """Stub ``run_init_if_needed`` so the test sees exactly what run_install
+    threaded into the init sub-step's CLI tier."""
+    seen: dict = {}
+
+    def fake_init(source_root, index_dir, model, *, retrieval=None, **_kwargs):
+        seen["retrieval"] = retrieval
+        return None
+
+    monkeypatch.setattr(installer, "run_init_if_needed", fake_init)
+    return seen
+
+
+def test_run_install_threads_effective_retrieval_into_init(tmp_path, monkeypatch):
+    """The post-Stage-2 choice (not just the YAML write) reaches the init
+    sub-step: ``jrag install --retrieval bm25`` must outrank an ambient
+    ``JAVA_CODEBASE_RAG_RETRIEVAL=vectors`` inside init too, so the sub-step
+    resolves bm25 (no cocoindex spawn) instead of following the env tier."""
+    _stub_install_stages(monkeypatch, vector_stack=True)
+    seen = _capture_init_retrieval(monkeypatch)
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "vectors")
+
+    rc = _run_stubbed_install(tmp_path, retrieval="bm25")
+    assert rc == 0
+    assert seen["retrieval"] == "bm25"
+
+
+def test_run_install_threads_forced_graph_only_bm25_into_init(tmp_path, monkeypatch):
+    """The graph-only force (no vector stack → bm25) also reaches init: the
+    sub-step must resolve bm25 even though no ``--retrieval`` flag was given."""
+    _stub_install_stages(monkeypatch, vector_stack=False)
+    seen = _capture_init_retrieval(monkeypatch)
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "vectors")
+
+    rc = _run_stubbed_install(tmp_path, retrieval=None)
+    assert rc == 0
+    assert seen["retrieval"] == "bm25"
+
+
 def test_run_install_default_vectors_not_persisted(tmp_path, monkeypatch):
     """Non-interactive vectors default writes no retrieval key.
 

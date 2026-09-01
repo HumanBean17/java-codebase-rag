@@ -233,7 +233,9 @@ def test_search_retrieval_bm25_forces_lexical_over_loaded_vector_backend(
 ) -> None:
     """retrieval=bm25 wins over the backend probe: even with a working (fake)
     vector backend installed, search_v2 must take the lexical route and never
-    call the vector backend."""
+    call the vector backend. The stack probe is forced present so the advisory
+    (which discriminates the two bm25 populations) is deterministic on any
+    platform — this is the stack-present population."""
     calls: list[dict[str, Any]] = []
 
     def fake_run_search(query, **kwargs):
@@ -242,6 +244,7 @@ def test_search_retrieval_bm25_forces_lexical_over_loaded_vector_backend(
 
     monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "bm25")
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
+    monkeypatch.setattr("java_codebase_rag.pipeline.vector_stack_installed", lambda: True)
 
     out = search_v2("ChatService", graph=ladybug_graph)
 
@@ -250,6 +253,28 @@ def test_search_retrieval_bm25_forces_lexical_over_loaded_vector_backend(
     assert _BM25_MODE_ADVISORY in out.advisories
     assert _GRAPH_ONLY_MODE_ADVISORY not in out.advisories
     assert calls == [], "bm25 mode must not call the vector backend"
+
+
+def test_search_retrieval_bm25_stack_absent_says_platform_not_rerun(
+    monkeypatch, ladybug_graph
+) -> None:
+    """bm25 on a stack-absent platform (Intel Mac, where the installer FORCES
+    bm25 into the YAML) must not advise re-running install to choose vectors —
+    that action is impossible there. The advisory is the platform string, and
+    the re-run-install string is absent (cross-absence both ways with the
+    stack-present test above)."""
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "bm25")
+    monkeypatch.setattr(
+        "java_codebase_rag.mcp.mcp_v2.run_search", lambda *args, **kwargs: _fake_search_rows()
+    )
+    monkeypatch.setattr("java_codebase_rag.pipeline.vector_stack_installed", lambda: False)
+
+    out = search_v2("ChatService", graph=ladybug_graph)
+
+    assert out.success is True
+    assert out.lexical_mode is True
+    assert _GRAPH_ONLY_MODE_ADVISORY in out.advisories
+    assert _BM25_MODE_ADVISORY not in out.advisories
 
 
 def test_search_retrieval_bm25_sql_table_advisory(monkeypatch, ladybug_graph) -> None:

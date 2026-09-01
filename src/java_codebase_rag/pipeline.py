@@ -322,6 +322,23 @@ def vector_stack_installed() -> bool:
     )
 
 
+def lexical_mode_label() -> str:
+    """Operator-facing label for the shared ``mode: lexical`` state value.
+
+    Two populations land in lexical mode: the vector stack is absent
+    (graph-only install, macOS Intel) or present with ``retrieval=bm25``. The
+    watch state file carries just ``lexical`` for both, so the renderers (the
+    daemon's TTY panel and ``jrag watch --status``) re-evaluate the probe here
+    to name the truthful cause — the same two-population discrimination as the
+    daemon's startup lines. Lives in this light module (not ``watch.daemon``)
+    because ``--status`` is a lightweight probe verb and must not import the
+    daemon module.
+    """
+    if vector_stack_installed():
+        return "lexical (retrieval=bm25)"
+    return "lexical (graph-only)"
+
+
 def _run_cocoindex_update_impl(
     env: dict[str, str],
     *,

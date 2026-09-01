@@ -1,7 +1,7 @@
 # Retrieval mode: user-selectable vectors | bm25
 
 - **Date:** 2026-08-30
-- **Status:** in_progress
+- **Status:** implemented
 
 ## Motivation
 

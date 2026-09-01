@@ -1182,6 +1182,7 @@ def run_init_if_needed(
     non_interactive: bool,
     quiet: bool,
     verbose: bool = False,
+    retrieval: str | None = None,
 ) -> bool | None:
     """Run init if index directory has no artifacts.
 
@@ -1200,6 +1201,11 @@ def run_init_if_needed(
         non_interactive: If True, suppress prompts
         quiet: If True, suppress progress output
         verbose: If True, raw-relay subprocess output (no Live region)
+        retrieval: Effective retrieval mode from the wizard (``"vectors"`` or
+            ``"bm25"``). Threaded into ``resolve_operator_config`` as the CLI
+            tier so an ambient ``JAVA_CODEBASE_RAG_RETRIEVAL`` cannot flip this
+            sub-step against the choice the operator just made in the SAME
+            ``jrag install`` run (``None`` defers to the env tier, as before).
 
     Returns:
         True if init ran and succeeded; False if it ran and failed (cocoindex or
@@ -1230,6 +1236,7 @@ def run_init_if_needed(
         source_root=source_root,
         cli_index_dir=None,  # use default (<source_root>/.java-codebase-rag)
         cli_embedding_model=model if model != "auto" else None,
+        cli_retrieval=retrieval,
     )
     cfg.apply_to_os_environ()
     env = cfg.subprocess_env()
@@ -2386,7 +2393,9 @@ def run_install(
     # Run init if index directory is empty. run_init_if_needed returns True (ran
     # OK), False (ran and failed — cocoindex/graph non-zero exit), or None
     # (skipped: index already exists). A failed index must NOT report success in
-    # CI/automation; a skip is not a failure (issue #351).
+    # CI/automation; a skip is not a failure (issue #351). The post-Stage-2
+    # ``retrieval`` (flag, prefill choice, or the graph-only force) rides along
+    # so the sub-step resolves the SAME mode the wizard just wrote to the YAML.
     index_dir = (source_root / ".java-codebase-rag").resolve()
     init_outcome = run_init_if_needed(
         source_root,
@@ -2395,6 +2404,7 @@ def run_install(
         non_interactive=non_interactive,
         quiet=quiet,
         verbose=verbose,
+        retrieval=retrieval,
     )
     if init_outcome is False:
         return 1

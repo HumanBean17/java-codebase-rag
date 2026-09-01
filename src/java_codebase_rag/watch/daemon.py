@@ -48,7 +48,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from java_codebase_rag.config import retrieval_mode_from_env
-from java_codebase_rag.pipeline import RETRIEVAL_BM25_HINT, vector_stack_installed
+from java_codebase_rag.pipeline import (
+    RETRIEVAL_BM25_HINT,
+    lexical_mode_label,
+    vector_stack_installed,
+)
 from java_codebase_rag.watch import paths
 from java_codebase_rag.watch.lock import (
     LockHeldError,
@@ -107,14 +111,16 @@ class WatchDaemon:
             "started_at": None,
             "pid": None,
             "socket": str(paths.socket_path(cfg.index_dir)),
-            # Display label derived from the install-time probe above (stack
+            # Display mode derived from the install-time probe above (stack
             # absent OR retrieval=bm25), NOT a live search-capability check — the
             # read path's actual lexical/vector choice is mcp_v2's
             # (``_ensure_vector_backend``). The two agree under the PEP 508
             # markers (the vector trio is present or absent together) and under a
-            # bm25 choice (nothing to embed). Surfaced in the status panel and
-            # ``jrag watch --status``; omitted from display on the normal (vector)
-            # path to avoid noise.
+            # bm25 choice (nothing to embed). The value stays the shared
+            # ``lexical``; renderers split it into the two-variant label
+            # (``lexical_mode_label``) so each cause is named truthfully.
+            # Surfaced in the status panel and ``jrag watch --status``; omitted
+            # from display on the normal (vector) path to avoid noise.
             "mode": "lexical" if not self._vector_enabled else "vector",
             "last_reindex_at": None,
             "last_reindex_kind": None,
@@ -327,7 +333,10 @@ class WatchDaemon:
         table = Table(title=f"jrag watch (pid {os.getpid()})", show_header=False, box=None)
         table.add_row("socket", str(state.get("socket")))
         if state.get("mode") == "lexical":
-            table.add_row("mode", "lexical (graph-only)")
+            # Two-population label (stack absent vs retrieval=bm25): the probe is
+            # re-evaluated at render time so a bm25 install on a vector-capable
+            # platform is not mislabeled graph-only.
+            table.add_row("mode", lexical_mode_label())
         table.add_row("reindex count", str(state.get("reindex_count", 0)))
         last_kind = state.get("last_reindex_kind")
         last_at = state.get("last_reindex_at")

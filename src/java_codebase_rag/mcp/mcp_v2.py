@@ -71,6 +71,15 @@ run_search: Any = _NOT_LOADED
 TABLES: dict = {}
 _vector_backend_lock = threading.Lock()
 
+# Shared by both lexical entries that exist because the vector stack is absent —
+# the probe fallback (mode vectors, backend missing) AND bm25 forced by a
+# stack-absent platform (Intel Mac): switching modes cannot help there, the
+# platform is the constraint.
+_GRAPH_ONLY_PLATFORM_ADVISORY = (
+    "lexical (graph-only) mode — keyword ranking only; "
+    "semantic/vector search requires Apple Silicon, Linux, or Windows"
+)
+
 
 def _ensure_vector_backend() -> None:
     """Populate ``run_search``/``TABLES`` from ``search_lancedb`` on first use.
@@ -986,15 +995,24 @@ def search_v2(
                     offset=None,
                 )
             if lexical_by_mode:
-                advisories.append(
-                    "lexical mode (retrieval=bm25) — keyword ranking only; "
-                    "re-run jrag install and choose vectors to enable semantic search"
-                )
+                # bm25 with the stack PRESENT is the operator's choice, so the
+                # actionable advice is to re-run install and switch. bm25 on a
+                # stack-ABSENT platform (Intel Mac, where the installer forces
+                # bm25 into the YAML) cannot act on that advice — vectors are not
+                # installable there — so say the truthful platform line instead.
+                # Lazy probe import keeps the bm25 fast path import-free at
+                # module level (mirrors daemon.py's two-population split).
+                from java_codebase_rag.pipeline import vector_stack_installed
+
+                if vector_stack_installed():
+                    advisories.append(
+                        "lexical mode (retrieval=bm25) — keyword ranking only; "
+                        "re-run jrag install and choose vectors to enable semantic search"
+                    )
+                else:
+                    advisories.append(_GRAPH_ONLY_PLATFORM_ADVISORY)
             else:
-                advisories.append(
-                    "lexical (graph-only) mode — keyword ranking only; "
-                    "semantic/vector search requires Apple Silicon, Linux, or Windows"
-                )
+                advisories.append(_GRAPH_ONLY_PLATFORM_ADVISORY)
             if table in ("sql", "yaml", "all"):
                 if lexical_by_mode:
                     advisories.append(

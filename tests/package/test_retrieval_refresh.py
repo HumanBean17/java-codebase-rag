@@ -161,6 +161,59 @@ def test_run_init_if_needed_vectors_mode_still_runs_cocoindex(
     assert VECTORS_SKIPPED_BM25 not in capsys.readouterr().err
 
 
+def test_run_init_if_needed_retrieval_kwarg_outranks_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """``jrag install --retrieval bm25`` must hold INSIDE the init sub-step: the
+    wizard's effective choice is threaded as the CLI tier of
+    ``resolve_operator_config``, so an ambient ``JAVA_CODEBASE_RAG_RETRIEVAL=vectors``
+    cannot flip the sub-step back to vectors (YAML bm25 + env vectors + CLI bm25)."""
+    _write_retrieval_yaml(tmp_path, "bm25")
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "vectors")
+    calls = _calls()
+    _install_index_stubs(monkeypatch, calls, coco="forbid")
+
+    ok = installer_mod.run_init_if_needed(
+        tmp_path,
+        tmp_path / ".java-codebase-rag",
+        "auto",
+        non_interactive=True,
+        quiet=True,
+        verbose=False,
+        retrieval="bm25",
+    )
+
+    assert ok is True
+    assert calls["graph"] == 1
+    assert VECTORS_SKIPPED_BM25 in capsys.readouterr().err
+
+
+def test_run_init_if_needed_env_still_wins_without_the_kwarg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control (today's env tier for a plain ``jrag install`` without the flag):
+    ``retrieval=None`` defers to env, so env vectors beats the YAML's bm25 and
+    cocoindex IS spawned — the read-side precedence (CLI > env > YAML) intact."""
+    _write_retrieval_yaml(tmp_path, "bm25")
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "vectors")
+    calls = _calls()
+    _install_index_stubs(monkeypatch, calls, coco="fake")
+
+    ok = installer_mod.run_init_if_needed(
+        tmp_path,
+        tmp_path / ".java-codebase-rag",
+        "auto",
+        non_interactive=True,
+        quiet=True,
+        verbose=False,
+        retrieval=None,
+    )
+
+    assert ok is True
+    assert calls["coco"] == 1
+    assert calls["graph"] == 1
+
+
 def test_run_init_if_needed_cocoindex_failure_hints_bm25(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:

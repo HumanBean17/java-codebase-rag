@@ -621,9 +621,10 @@ def _write_retrieval_yaml(source_root: Path, retrieval: str) -> None:
 def test_daemon_bm25_probe_disables_vectors_and_labels_lexical(tmp_path, monkeypatch):
     """``retrieval: bm25`` with the vector stack installed: the compound probe
     (stack present AND retrieval vectors) makes ``_vector_enabled`` False by
-    operator choice, so the state file's display label reads ``lexical`` via the
-    existing label logic alone — no separate bm25 label — and constructing the
-    daemon never warms the embedding model (there is nothing to embed)."""
+    operator choice, so the state file's mode value stays the shared ``lexical``
+    (the rendered panel/``--status`` label splits by cause — see the label tests
+    below) and constructing the daemon never warms the embedding model (there is
+    nothing to embed)."""
     from java_codebase_rag.config import resolve_operator_config
     from java_codebase_rag.watch import daemon as daemon_mod
 
@@ -658,6 +659,155 @@ def test_daemon_bm25_probe_disables_vectors_and_labels_lexical(tmp_path, monkeyp
     assert d._vector_enabled is False
     assert d._state["mode"] == "lexical"
     _cleanup_runtime(index_dir)
+
+
+# --- lexical label split: one ``mode: lexical`` state, two truthful labels ----
+#
+# The state file carries just ``lexical`` for BOTH skip causes (stack absent vs
+# retrieval=bm25); the rendered TTY panel and ``--status`` line must name the
+# actual cause, re-evaluating the stack probe at render time — mirroring the
+# two-population discrimination of the startup lines (daemon.run_foreground).
+
+
+def _lexical_daemon(monkeypatch, tmp_path, *, stack_installed: bool, tag: str):
+    """Construct a REAL WatchDaemon in lexical mode with the stack probe forced.
+
+    Same shape as the bm25 construction test above: WarmResources is swapped
+    for an inert fake (lexical mode never warms the model — construction or
+    serving), so no torch/index is touched. Lexical mode comes from the stack
+    being absent (``retrieval: vectors`` YAML) or from ``retrieval: bm25``."""
+    from java_codebase_rag.config import resolve_operator_config
+    from java_codebase_rag.watch import daemon as daemon_mod
+
+    index_dir, source_root = _index_source(tmp_path, tag=tag)
+    _anchor_env(monkeypatch, index_dir, source_root)
+    _write_retrieval_yaml(source_root, "vectors" if not stack_installed else "bm25")
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+    # Both bindings see the forced probe: daemon's own (gates ``_vector_enabled``
+    # at construction) and pipeline's (``lexical_mode_label`` resolves it there
+    # at render time).
+    monkeypatch.setattr(daemon_mod, "vector_stack_installed", lambda: stack_installed)
+    monkeypatch.setattr(
+        "java_codebase_rag.pipeline.vector_stack_installed", lambda: stack_installed
+    )
+
+    class _InertWarm:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def model(self):
+            raise AssertionError("warm.model() must not be called in lexical mode")
+
+        def graph(self):
+            return None
+
+        def begin_graph_snapshot(self):
+            pass
+
+        def commit_graph_snapshot(self):
+            pass
+
+    monkeypatch.setattr(daemon_mod, "WarmResources", _InertWarm)
+
+    cfg = resolve_operator_config(source_root=None, cli_index_dir=str(index_dir))
+    return daemon_mod.WatchDaemon(cfg), index_dir
+
+
+def _panel_text(d) -> str:
+    """Render the daemon's status panel to plain text for substring asserts."""
+    import io
+
+    from rich.console import Console
+
+    buf = io.StringIO()
+    Console(file=buf, width=120).print(d._render_panel())
+    return buf.getvalue()
+
+
+def test_lexical_mode_label_stack_absent(monkeypatch):
+    """Stack absent (graph-only install): the label names graph-only, not bm25."""
+    from java_codebase_rag.pipeline import lexical_mode_label
+
+    monkeypatch.setattr("java_codebase_rag.pipeline.vector_stack_installed", lambda: False)
+    assert lexical_mode_label() == "lexical (graph-only)"
+
+
+def test_lexical_mode_label_bm25_stack_present(monkeypatch):
+    """Stack present + retrieval=bm25: the label names the operator's choice."""
+    from java_codebase_rag.pipeline import lexical_mode_label
+
+    monkeypatch.setattr("java_codebase_rag.pipeline.vector_stack_installed", lambda: True)
+    assert lexical_mode_label() == "lexical (retrieval=bm25)"
+
+
+def test_render_panel_lexical_label_stack_absent(monkeypatch, tmp_path):
+    d, index_dir = _lexical_daemon(
+        monkeypatch, tmp_path, stack_installed=False, tag="lblgo"
+    )
+    try:
+        text = _panel_text(d)
+        assert "lexical (graph-only)" in text
+        assert "lexical (retrieval=bm25)" not in text
+    finally:
+        _cleanup_runtime(index_dir)
+
+
+def test_render_panel_lexical_label_bm25_stack_present(monkeypatch, tmp_path):
+    d, index_dir = _lexical_daemon(
+        monkeypatch, tmp_path, stack_installed=True, tag="lblbm"
+    )
+    try:
+        text = _panel_text(d)
+        assert "lexical (retrieval=bm25)" in text
+        assert "lexical (graph-only)" not in text
+    finally:
+        _cleanup_runtime(index_dir)
+
+
+def _status_line(monkeypatch, tmp_path, *, stack_installed: bool) -> str:
+    """Render ``jrag watch --status``'s alive block for a lexical daemon.
+
+    The state file and liveness probe are faked at their seams (the status
+    renderer is the unit under test, not the daemon lifecycle); the stack probe
+    is forced so the label variant is deterministic on any platform."""
+    from types import SimpleNamespace
+
+    from java_codebase_rag.jrag import _cmd_watch_status
+
+    # The label resolves the probe in pipeline's namespace (``--status`` must
+    # not import the daemon module — see the heavy-import guard test below).
+    monkeypatch.setattr(
+        "java_codebase_rag.pipeline.vector_stack_installed", lambda: stack_installed
+    )
+    monkeypatch.setattr(
+        "java_codebase_rag.jrag._read_state_file", lambda _idx: {"mode": "lexical"}
+    )
+    monkeypatch.setattr(
+        "java_codebase_rag.watch.client.is_daemon_alive", lambda _idx: True
+    )
+    monkeypatch.setattr(
+        "java_codebase_rag.watch.lock.ProjectLock.read_holder",
+        classmethod(lambda cls, _idx: 4242),
+    )
+
+    index_dir, _source_root = _index_source(tmp_path, tag="lblst")
+    return _cmd_watch_status(SimpleNamespace(index_dir=index_dir))
+
+
+def test_watch_status_lexical_label_stack_absent(monkeypatch, tmp_path, capsys):
+    rc = _status_line(monkeypatch, tmp_path, stack_installed=False)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "mode: lexical (graph-only)" in out
+    assert "mode: lexical (retrieval=bm25)" not in out
+
+
+def test_watch_status_lexical_label_bm25_stack_present(monkeypatch, tmp_path, capsys):
+    rc = _status_line(monkeypatch, tmp_path, stack_installed=True)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "mode: lexical (retrieval=bm25)" in out
+    assert "mode: lexical (graph-only)" not in out
 
 
 _BM25_STUB_SCRIPT = '''\

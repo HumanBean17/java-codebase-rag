@@ -209,7 +209,7 @@ Ranked chunk retrieval. Args: `query`, `table` (`java`|`sql`|`yaml`|`all`, defau
 
 > **Intel Mac (graph-only) installs:** `search` runs the **lexical backend** — BM25 keyword ranking over the symbol graph's LadybugDB full-text index instead of embeddings, behind this same contract. Same `query`/`table`/`filter`/`limit`/`chunks` behavior; results are keyword-ranked (not semantic), `hybrid` is ignored, `sql`/`yaml` tables aren't indexed (only Java symbols), and an `advisories` entry + `lexical_mode=true` flag note the mode. Structural discovery (`find`/`describe`/`neighbors`/`resolve`) is unaffected.
 >
-> **Operator-chosen bm25 (`retrieval: bm25`) looks the same:** on any platform the operator can select keyword search at install time (`jrag install --retrieval bm25`), and `search` then runs this same lexical backend — `lexical_mode=true` with a mode-aware advisory, `hybrid` ignored, and the `sql`/`yaml` tables **not searched** (keyword ranking covers Java/Kotlin symbols only, even though those tables are indexed).
+> **Operator-chosen bm25 (`retrieval: bm25`) looks the same:** on any platform the operator can select keyword search at install time (`jrag install --retrieval bm25`), and `search` then runs this same lexical backend — `lexical_mode=true` with a mode-aware advisory, `hybrid` ignored, and the `sql`/`yaml` tables not searched — keyword ranking covers Java/Kotlin symbols only (the Lance tables holding them are never built in lexical mode; leftovers from a prior vectors run are never queried).
 
 #### `find`
 

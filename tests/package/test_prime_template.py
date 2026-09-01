@@ -17,8 +17,12 @@ from pathlib import Path
 
 from java_codebase_rag.prime import PrimeState, _staleness_since, render, render_hook_json
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_JRAG_EXE = _REPO_ROOT / ".venv" / "bin" / "jrag"
+# The drift guard runs the agent CLI through the interpreter already running
+# the tests (conftest pins the editable install, so this is this source tree).
+# Never hardcode `.venv/bin/jrag` — CI installs via setup-python, no repo venv.
+# Module invocation, not the console script: `cli` is the operator lifecycle
+# CLI; `jrag` here is the agent CLI the payload must track.
+_JRAG_CMD = [sys.executable, "-m", "java_codebase_rag.jrag"]
 
 _HEAVY_DEPS = ("torch", "sentence_transformers", "lancedb", "pyarrow", "cocoindex")
 
@@ -253,7 +257,7 @@ def _help_command_entries(help_text: str) -> list[str]:
 
 
 def test_template_tracks_real_help() -> None:
-    proc = subprocess.run([str(_JRAG_EXE), "--help"], capture_output=True, text=True)
+    proc = subprocess.run([*_JRAG_CMD, "--help"], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
     help_entries = set(_help_command_entries(proc.stdout))

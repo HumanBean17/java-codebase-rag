@@ -36,6 +36,15 @@ class TestInstallIntegration:
         # Create .git so update_gitignore works
         (cwd / ".git").mkdir()
 
+        # Seed a committed 0.12.x-era artifact the way an upgrading repo
+        # carries one. tests/*/.claude/ is gitignored, so this must be created
+        # here — never read from the fixture tree. Install must leave it in
+        # place; removal is `jrag update`'s job (pinned in
+        # test_installer_legacy_cleanup.py).
+        fixture_skill = cwd / ".claude" / "skills" / "explore-codebase-cli" / "SKILL.md"
+        fixture_skill.parent.mkdir(parents=True, exist_ok=True)
+        fixture_skill.write_text("# legacy 0.12.x skill, committed by the user\n")
+
         # Run install via subprocess to test the CLI integration
         result = subprocess.run(
             [

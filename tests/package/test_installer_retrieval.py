@@ -92,6 +92,52 @@ def test_interactive_prompt_defaults_to_prefill(monkeypatch):
     assert seen["default"] == "bm25"
 
 
+def test_interactive_note_discloses_sql_yaml_limit(monkeypatch, capsys):
+    """The wizard Note pins the D8 disclosure verbatim.
+
+    Spec D8 requires the sql/yaml limitation on all three surfaces (wizard
+    note, docs, advisory), so the exact Note line is asserted here to keep
+    them from drifting apart again.
+    """
+    monkeypatch.setattr(installer, "prompt", lambda *args, **kwargs: "vectors")
+
+    select_retrieval(non_interactive=False, cli_retrieval=None)
+
+    assert capsys.readouterr().out.splitlines() == [
+        (
+            "Note: 'vectors' needs an embedding model (auto-downloaded from Hugging "
+            "Face, or a local path); 'bm25' is keyword search — no model, no "
+            "downloads, works offline. In bm25 mode the sql/yaml tables are not "
+            "searched (Java/Kotlin symbols only)."
+        )
+    ]
+
+
+def test_interactive_prefill_invalid_value_falls_back_to_vectors(monkeypatch):
+    """A hand-edited YAML value (``retrieval: BM25``) must not crash the wizard.
+
+    questionary validates ``default`` against the choice values and raises
+    ``ValueError`` on anything else, killing an interactive re-run with a raw
+    traceback — so an invalid prefill is clamped to the recommended default.
+    """
+    seen: dict = {}
+
+    def fake_prompt(prompt_type, message, *, choices=None, default=None):
+        # Mirror questionary's select(): an unknown default raises before the
+        # prompt is ever shown.
+        if default not in [c["value"] for c in (choices or [])]:
+            raise ValueError("Invalid 'default' value")
+        seen["default"] = default
+        return default
+
+    monkeypatch.setattr(installer, "prompt", fake_prompt)
+
+    selected = select_retrieval(non_interactive=False, cli_retrieval=None, prefill="BM25")
+
+    assert selected == "vectors"
+    assert seen["default"] == "vectors"
+
+
 def test_retrieval_choices_vectors_first_and_recommended():
     """_retrieval_choices lists vectors first and marks it '(Recommended)'."""
     choices = installer._retrieval_choices()

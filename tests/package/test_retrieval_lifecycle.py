@@ -197,6 +197,34 @@ def test_increment_bm25_vectors_only_is_clean_noop(
     }
 
 
+def test_increment_vectors_only_ladybug_warning_gated_by_retrieval_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """--vectors-only emits the ladybug warning only when vectors actually ran.
+
+    Under bm25 the vectors phase is skipped, so the warning's closing line
+    ("Lance vector index has been updated incrementally and is current") would
+    be false and would contradict the 'increment skipped' payload that follows.
+    """
+    _write_retrieval_yaml(tmp_path, "bm25")
+    _install_stubs(monkeypatch, _calls(), coco="forbid")
+
+    assert cli_mod._cmd_increment(_ns(tmp_path, tmp_path / "idx", vectors_only=True)) == 0
+    err = capsys.readouterr().err
+    assert "Lance vector index has been updated incrementally and is current." not in err
+
+    # Control: vectors mode with --vectors-only still emits the warning. The
+    # first call published JAVA_CODEBASE_RAG_RETRIEVAL (env overrides YAML), so
+    # clear it before re-resolving the config from the rewritten YAML.
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
+    _write_retrieval_yaml(tmp_path, "vectors")
+    _install_stubs(monkeypatch, _calls(), coco="fake")
+
+    assert cli_mod._cmd_increment(_ns(tmp_path, tmp_path / "idx", vectors_only=True)) == 0
+    err = capsys.readouterr().err
+    assert "Lance vector index has been updated incrementally and is current." in err
+
+
 # --- reprocess ---------------------------------------------------------------
 
 

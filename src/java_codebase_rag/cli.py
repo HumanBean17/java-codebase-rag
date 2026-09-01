@@ -454,7 +454,9 @@ def _cmd_increment(args: argparse.Namespace) -> int:
 
     # Check for --vectors-only flag
     vectors_only = bool(getattr(args, "vectors_only", False))
-    if vectors_only:
+    if vectors_only and cfg.retrieval != "bm25":
+        # Under bm25 the vectors phase below is skipped, so the warning's
+        # "Lance vector index ... is current" line would be false.
         _emit_increment_ladybug_warning()
 
     def work(progress: "PipelineProgress | None") -> int:

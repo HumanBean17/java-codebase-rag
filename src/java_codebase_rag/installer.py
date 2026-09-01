@@ -668,8 +668,10 @@ def select_retrieval(
         non_interactive: If True, honor ``cli_retrieval`` (default ``"vectors"``).
         cli_retrieval: Retrieval mode from the ``--retrieval`` CLI flag.
         prefill: On re-run, the mode recorded in the existing YAML config.
-            When set, the cursor defaults to it so the user can keep the prior
-            choice with Enter (``vectors`` is still shown first + recommended).
+            When valid, the cursor defaults to it so the user can keep the
+            prior choice with Enter (``vectors`` is still shown first +
+            recommended). Any other value (e.g. a hand-edited ``BM25``) falls
+            back to the ``vectors`` default rather than crashing the wizard.
 
     Returns:
         Selected retrieval mode (``"vectors"`` or ``"bm25"``).
@@ -690,13 +692,17 @@ def select_retrieval(
     print(
         "Note: 'vectors' needs an embedding model (auto-downloaded from Hugging "
         "Face, or a local path); 'bm25' is keyword search — no model, no "
-        "downloads, works offline."
+        "downloads, works offline. In bm25 mode the sql/yaml tables are not "
+        "searched (Java/Kotlin symbols only)."
     )
 
     # vectors is always shown first + recommended; the cursor defaults to the
     # prior choice (prefill) on re-run so the user can keep it with Enter.
+    # questionary validates `default` against the choice values, so an invalid
+    # prefill (hand-edited YAML, e.g. "BM25") must be clamped — it would raise
+    # ValueError and kill the wizard instead of degrading to the default.
     choices = _retrieval_choices()
-    default = prefill if prefill is not None else "vectors"
+    default = prefill if prefill in ("vectors", "bm25") else "vectors"
 
     selected = prompt(
         "select",

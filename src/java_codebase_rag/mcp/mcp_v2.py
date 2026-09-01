@@ -48,7 +48,7 @@ from java_codebase_rag.graph.graph_types import (
     set_hints_enabled,
 )
 from java_codebase_rag.search.index_common import SBERT_MODEL
-from java_codebase_rag.config import resolved_sbert_model_for_process_env
+from java_codebase_rag.config import resolved_sbert_model_for_process_env, retrieval_mode_from_env
 from java_codebase_rag.graph.java_ontology import EDGE_SCHEMA
 from java_codebase_rag.graph.ladybug_queries import LadybugGraph, OVERRIDE_AXIS_COMPOSED_EDGE_TYPES
 from java_codebase_rag.mcp.mcp_hints import MCP_HINTS_STRUCTURED_FIELD_DESCRIPTION
@@ -951,17 +951,28 @@ def search_v2(
         if nf and (err := _nodefilter_applicability_error("symbol", nf)):
             _log_fail_loud("applicability")
             return SearchOutput(success=False, message=err, advisories=[], limit=None, offset=None)
-        _ensure_vector_backend()
+        # Mode-first dispatch: ``retrieval=bm25`` selects the lexical backend outright
+        # — the vector stack is never probed (no search_lancedb import paid;
+        # ``run_search`` stays at its ``_NOT_LOADED`` sentinel). Every other mode keeps
+        # today's probe-then-dispatch: load the backend, then fall back to lexical when
+        # it is absent (graph-only install) or test-forced (``run_search`` = None).
+        mode = retrieval_mode_from_env()
+        lexical_by_mode = mode == "bm25"
+        if lexical_by_mode:
+            lexical_mode = True
+        else:
+            _ensure_vector_backend()
+            lexical_mode = run_search is None
         advisories: list[str] = []
-        lexical_mode = run_search is None
         if lexical_mode:
-            # Graph-only install (macOS Intel: no torch/lancedb). Fall back to lexical
-            # (keyword) search over the symbol graph that graph-only mode already builds.
-            # run_lexical_search returns rows in the same shape as run_search, so the
-            # shared row->hit loop below works unchanged. It raises (message contains
-            # "lexical search unavailable") when no graph exists — caught by the outer
-            # try -> success=False. It returns [] for sql/yaml (advisory below) and for
-            # empty-but-valid results.
+            # Lexical (keyword) search over the symbol graph — entered either by
+            # operator choice (retrieval=bm25; embedding model deliberately skipped)
+            # or because the vector stack is absent (graph-only install, macOS
+            # Intel: no torch/lancedb). run_lexical_search returns rows in the same
+            # shape as run_search, so the shared row->hit loop below works unchanged.
+            # It raises (message contains "lexical search unavailable") when no graph
+            # exists — caught by the outer try -> success=False. It returns [] for
+            # sql/yaml (advisory below) and for empty-but-valid results.
             try:
                 from java_codebase_rag.search.search_lexical import run_lexical_search
             except ImportError:  # pragma: no cover - search_lexical has no heavy deps
@@ -974,16 +985,28 @@ def search_v2(
                     limit=None,
                     offset=None,
                 )
-            advisories.append(
-                "lexical (graph-only) mode — keyword ranking only; "
-                "semantic/vector search requires Apple Silicon, Linux, or Windows"
-            )
-            if table in ("sql", "yaml", "all"):
+            if lexical_by_mode:
                 advisories.append(
-                    "sql/yaml tables are not indexed in graph-only mode; only Java symbols were searched"
+                    "lexical mode (retrieval=bm25) — keyword ranking only; "
+                    "re-run jrag install and choose vectors to enable semantic search"
                 )
+            else:
+                advisories.append(
+                    "lexical (graph-only) mode — keyword ranking only; "
+                    "semantic/vector search requires Apple Silicon, Linux, or Windows"
+                )
+            if table in ("sql", "yaml", "all"):
+                if lexical_by_mode:
+                    advisories.append(
+                        "sql/yaml tables are not searched in bm25 (lexical) mode; "
+                        "only Java symbols were searched"
+                    )
+                else:
+                    advisories.append(
+                        "sql/yaml tables are not indexed in graph-only mode; only Java symbols were searched"
+                    )
             if hybrid:
-                advisories.append("hybrid is ignored in graph-only lexical mode")
+                advisories.append("hybrid is ignored in lexical mode")
             rows = run_lexical_search(
                 query,
                 table=table,

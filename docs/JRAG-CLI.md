@@ -23,7 +23,7 @@ If `jrag` is missing, run the module entrypoint:
 
 ### `install`
 
-Interactive setup wizard that walks users through Java source detection, embedding model selection, agent host configuration, agent-surface wiring (SessionStart hook or MCP entry), and YAML config generation. Use `--non-interactive` for CI/automation.
+Interactive setup wizard that walks users through Java source detection, embedding model selection, agent host configuration, artifact deployment, and YAML config generation. Use `--non-interactive` for CI/automation.
 
 ```bash
 # Interactive mode
@@ -45,7 +45,7 @@ jrag install --scope user
 - `--agent {claude-code,qwen-code,gigacode}` — Agent host to configure (can be passed multiple times).
 - `--scope {project,user}` — Installation scope (default: `project`). Project scope writes to `.<host>/` in the project repo; user scope writes to `~/.<host>/` (globally available).
 - `--model MODEL` — Embedding model path or `auto` (default: `auto`, downloads `sentence-transformers/all-MiniLM-L6-v2` on first run).
-- `--surface {mcp,cli}` — Agent surface (default: `cli`, recommended). `cli` installs a **`jrag prime` SessionStart hook** into each selected host's settings file — no files are deployed. `mcp` registers the `jrag-mcp` stdio MCP server (five tools: `search`/`find`/`describe`/`neighbors`/`resolve`) — tools only, no files. Omit to choose interactively. See [`jrag prime`](#jrag-prime-sessionstart-priming) below.
+- `--surface {mcp,cli}` — Agent surface (default: `cli`, recommended). `cli` deploys the `jrag` console-script skill + `explorer-rag-cli` subagent (one command per intent, no MCP entry). `mcp` registers the `jrag-mcp` stdio MCP server (five tools: `search`/`find`/`describe`/`neighbors`/`resolve`) plus the `explore-codebase` skill + `explorer-rag-enhanced` subagent. Omit to choose interactively.
 - `--quiet` / `-q` — Suppress the indexing progress stream on stderr (wizard prompts unchanged).
 - `--verbose` / `-v` — Raw-relay subprocess output during the indexing sub-step (no progress bar).
 
@@ -59,11 +59,11 @@ jrag install --scope user
 2. Embedding model selection — auto-download or local path.
 3. Agent host selection — Claude Code, Qwen Code, GigaCode (multi-select).
 4. Install scope — project or user.
-5. Surface selection — `cli` (recommended: prime hook) or `mcp` (stdio MCP server). Re-runs pre-fill the prior surface.
-6. Surface entrypoint resolution + deployment — the SessionStart prime hook (`cli`) or the MCP server entry (`mcp`). Neither surface deploys files.
+5. Surface selection — `cli` (recommended, `jrag` skill+subagent) or `mcp` (stdio server + skill + subagent). Re-runs pre-fill the prior surface.
+6. Surface entrypoint resolution + artifact deployment — config (mcp only), skill, agent files.
 7. Index + finish — YAML generation, `.gitignore` update, `init`. Stage 7's indexing sub-step renders the unified `Vectors → Optimize → Graph` progress on **stderr** (see [Indexing progress](#indexing-progress-stderr)); the wizard's conversational stdout is unchanged.
 
-**Re-running `install`:** If `.java-codebase-rag.yml` exists, the installer shows current values and offers "Update" (pre-filled) or "Start fresh". Existing MCP entries are updated in-place (merged, not duplicated). The SessionStart hook merges idempotently — keyed on its command, never duplicated, and never touching unrelated hooks.
+**Re-running `install`:** If `.java-codebase-rag.yml` exists, the installer shows current values and offers "Update" (pre-filled) or "Start fresh". Existing MCP entries are updated in-place (merged, not duplicated). Skill/agent files trigger overwrite confirmation.
 
 #### Multi-system workspace
 
@@ -95,7 +95,7 @@ Detection recognises the multi-system layout, prints the systems it found (`Mult
 
 ### `update`
 
-Post-upgrade refresh: brings the deployed surface's entry up to date — the SessionStart prime hook's command on the `cli` surface, the MCP server command path on the `mcp` surface — and removes any legacy 0.12.x skill/agent files still on disk. If an index exists, also runs an incremental Lance + graph catch-up (same as `increment`). Can also switch the agent surface (`mcp` ↔ `cli`) for an existing install. Requires a prior `install` run.
+Post-upgrade refresh: overwrites skill and agent files with the latest shipped versions and updates the MCP command path. If an index exists, also runs an incremental Lance + graph catch-up (same as `increment`). Can also switch the agent surface (`mcp` ↔ `cli`) for an existing install. Requires a prior `install` run.
 
 ```bash
 # Refresh after pip upgrade
@@ -114,16 +114,15 @@ jrag update --surface mcp      # cli → mcp
 ```
 
 **Flags:**
-- `--force` — Overwrite all artifacts even if content matches. (Effectively inert for the hook: it is content-addressed by the resolved `jrag` path, so a matching entry is already current.)
+- `--force` — Overwrite all artifacts even if content matches.
 - `--dry-run` — Print changes without writing files.
-- `--surface {mcp,cli}` — Switch agent surface. Tears down the old surface's entry (removes just the `jrag-mcp` MCP entry on `mcp`→`cli`; removes the SessionStart prime hook on `cli`→`mcp`), deploys the new surface's, and rewrites the install marker so the switch persists. Omit to keep the current surface; on a TTY you'll be prompted (cursor on the current surface).
+- `--surface {mcp,cli}` — Switch agent surface. Tears down the old surface's artifacts (removes just the `jrag-mcp` MCP entry on `mcp`→`cli`; removes the `jrag` skill/subagent on `cli`→`mcp`), deploys the new surface's, and rewrites the install marker so the switch persists. Omit to keep the current surface; on a TTY you'll be prompted (cursor on the current surface).
 - `--quiet` / `-q` — Suppress the indexing progress stream on stderr (wizard stdout unchanged).
 - `--verbose` / `-v` — Raw-relay subprocess output during the indexing sub-step (no progress bar).
 
 **Behavior:**
-- Detects previously configured agent hosts (reads the `.java-codebase-rag.hosts` marker — one `surface` value (`mcp`|`cli`) per host; falls back to scanning project- and user-level MCP config files).
-- Refreshes the deployed surface: on `cli`, re-points the prime hook at the current `jrag` path (no-op when already current); on `mcp`, updates the MCP entrypoint path if `jrag-mcp` has moved.
-- Removes the four legacy 0.12.x artifact files wherever they still exist in the scope — `skills/explore-codebase/SKILL.md`, `skills/explore-codebase-cli/SKILL.md`, `agents/explorer-rag-enhanced.md`, `agents/explorer-rag-cli.md` — so upgrades from any 0.12.x clean up regardless of which surface was installed then.
+- Detects previously configured agent hosts (reads the `.java-codebase-rag.hosts` marker; falls back to scanning project- and user-level MCP config files).
+- Refreshes skill and agent files (versioned assets from the package). On the `mcp` surface, also updates the MCP entrypoint path if `jrag-mcp` has moved.
 - With `--surface` (or the interactive prompt), migrates each host whose recorded surface differs: tears down the old surface, deploys the new one, rewrites the marker. Non-interactive `update` without `--surface` keeps the current surface.
 - Runs an incremental index update (Lance + graph) if an index exists — same as `jrag increment`. The indexing sub-step renders the unified `Vectors → Optimize → Graph` progress on **stderr** (see [Indexing progress](#indexing-progress-stderr)); it no longer runs silently.
 
@@ -482,13 +481,13 @@ See [`jrag search`](#jrag-search) below for the full flag reference (hybrid, exp
 jrag vocab-index            # rebuild the vocabulary sidecar (did-you-mean / absence diagnosis)
 ```
 
-### `jrag prime` (SessionStart priming)
+### `jrag prime` (optional SessionStart priming)
 
-`prime` prints the orientation payload that the `cli` surface injects at session start: a navigation-framed summary of what `jrag` is, one trust rule, the live index state, and the agent command surface embedded verbatim from `jrag --help`. It is the payload behind the SessionStart hook that `jrag install --surface cli` wires; running it by hand shows exactly what a hooked session sees.
+`prime` prints an orientation payload for agents: a navigation-framed summary of what `jrag` is, one trust rule, the live index state, and the agent command surface embedded verbatim from `jrag --help`. It is **optional and not wired into `install`** — the skill/agent artifacts remain the shipped teaching surface. Hosts that support SessionStart hooks can inject the payload at every session start by wiring it manually.
 
 ```bash
 jrag prime                    # bare markdown (human inspection)
-jrag prime --hook-json        # SessionStart hook envelope (what the hook emits)
+jrag prime --hook-json        # SessionStart hook envelope (what a hook emits)
 ```
 
 **Payload template** — four parts; `{…}` slots are computed per repo (canonical text: `PRIME_TEMPLATE` in `java_codebase_rag/prime.py`):
@@ -534,9 +533,7 @@ Silence when unindexed is what makes a user-scope hook tolerable — prime fires
 
 **Latency.** SessionStart fires on start, resume, and after compaction, so prime reads metadata only — project-root discovery, graph meta, index mtimes, and the watch daemon state file. It never imports the vector stack (torch / sentence_transformers / lancedb); a test guards the import set.
 
-**Where the hook lives.** `install --surface cli` merges it into each selected host's settings file: claude-code → `.claude/settings.json` (project scope) or `~/.claude/settings.json` (user scope); qwen-code → `.qwen/settings.json`; gigacode → `.gigacode/settings.json`. The merge is idempotent, keyed on the hook command, and never touches unrelated hooks.
-
-**Manual wiring (other hosts).** For a host outside the three above that supports SessionStart-style hooks, add this to its settings JSON (`jrag` must be on the host's PATH — the installer writes the resolved absolute path):
+**Manual wiring.** To try prime in Claude Code, add this to `.claude/settings.json` (project scope) or `~/.claude/settings.json` (user scope — it stays silent in repos without an index). The same shape works for qwen-code (`.qwen/settings.json`) and any SessionStart-hook host; `jrag` must be on the host's PATH:
 
 ```json
 {

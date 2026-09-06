@@ -2,6 +2,17 @@
 
 **Status:** in_progress
 
+> **Pivot (2026-09-06, maintainer decision).** With the Phase-A gate failed
+> (below), the removal is off the table for now. The skill/agent artifacts,
+> the installer that deploys them, and `jrag update`'s refresh behavior ship
+> unchanged from 0.12.x. What ships from this spec is the additive part only:
+> the `jrag prime` command (+ `--hook-json`), its tests, and the bench wiring
+> (`tools: prime`). The hook is **manual wiring** (documented paste-in JSON in
+> JRAG-CLI.md) — not wired into `install`, which keeps the installer at its
+> 0.12.x contract. The maintainer validates prime personally before any
+> promotion of the hook (or re-litigation of the removal). Sections below
+> describe the original superseded design and the gate that failed it.
+
 ## Context
 
 Issue #464: bench condition D (jrag full) over-explores — the agent graph-walks
@@ -243,12 +254,11 @@ semantic vs A's 0/3. P2 directional fail: D mean tool calls 6.8 → 8.0, caps
 2/20 → 3/20. P3 held: blast-radius 0/2 caps, 7.0 = 7.0. Runs live in
 `bench/results/20260831T230727` (baseline) / `20260831T231733` (revised);
 prereg amendment 2026-08-31 in `bench/PREREGISTRATION.md`. Per that
-pre-committed rule, the branch ships prime + hook wiring + artifact removal
-anyway and 0.13.0 must not be tagged. Whether to defer the removal per this
-spec's original contingency is the PR review's call. If a release does happen,
-notes carry the breaking-change line (skills/agents removed; `jrag update`
-cleans up deployed copies) and the dual PyPI publish (`jrag-cli` +
-`java-codebase-rag`, same version) per the publish-pip skill.
+pre-committed rule, the branch originally shipped prime + hook wiring +
+artifact removal with no 0.13.0 tag. **Resolution (2026-09-06):** the removal
+and hook installer machinery were reverted pre-merge (see Pivot above) — the
+merged change is purely additive, so the no-tag rule no longer binds and a
+normal release (dual PyPI publish per the publish-pip skill) may follow merge.
 
 ## Open Questions
 
@@ -271,3 +281,5 @@ only; MCP tools self-announce. Bench Phase A rewrites the D prompt to
 runtime-generated prime output and runs the #464 slice; Phase B (removal +
 hook wiring, one 0.13.0 release) proceeds only if revised-D caps drop to ≤ A's
 (gate subsequently FAILED — see Rollout; merge decision deferred to PR review).
+**Shipped instead (2026-09-06 pivot):** additive `jrag prime` only — artifacts and
+installer unchanged from 0.12.x, hook = manual wiring, removal reverted.

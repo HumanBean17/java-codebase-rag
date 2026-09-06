@@ -1,6 +1,6 @@
 # Drop SQL/YAML vector indexing — sources only
 
-**Status:** draft
+**Status:** in_progress
 
 ## Context
 

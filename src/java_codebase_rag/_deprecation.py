@@ -29,11 +29,6 @@ import sys
 
 _LEGACY_ALIASES = frozenset({"java-codebase-rag", "java-codebase-rag-mcp"})
 
-_DEPRECATION_LINE = (
-    "jrag: 'java-codebase-rag' is now 'jrag'; this alias continues to work. "
-    "Set JRAG_NO_DEPRECATION=1 to silence.\n"
-)
-
 
 def _deprecation_notice() -> str:
     """Localized notice (lazy: module-level constants freeze at import)."""

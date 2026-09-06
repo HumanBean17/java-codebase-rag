@@ -1285,13 +1285,13 @@ def _cmd_vocab_index(args: argparse.Namespace) -> int:
     try:
         index.save(sidecar_path, ontology_version=ONTOLOGY_VERSION)
     except Exception as e:
-        print(f"[error] Failed to save vocabulary index: {e}", file=sys.stderr)
+        print(tr("ERR_VOCAB_SAVE_FAILED", exc=e), file=sys.stderr)
         return 1
 
     # Print success message (simple format for admin command)
-    print(f"Vocabulary index rebuilt successfully:")
-    print(f"  Symbol count: {index.symbol_count}")
-    print(f"  Sidecar path: {sidecar_path}")
+    print(tr("MSG_VOCAB_REBUILT"))
+    print(tr("MSG_VOCAB_SYMBOL_COUNT", n=index.symbol_count))
+    print(tr("MSG_VOCAB_SIDECAR", path=sidecar_path))
     return 0
 
 
@@ -1384,7 +1384,7 @@ def _cmd_watch_stop(cfg) -> int:
     state_path = paths.state_path(cfg.index_dir)
     pid = ProjectLock.read_holder(cfg.index_dir)
     if pid is None:
-        print("jrag watch: not running")
+        print(tr("MSG_WATCH_NOT_RUNNING"))
         _watch_unlink(sock)
         _watch_unlink(state_path)
         return 1

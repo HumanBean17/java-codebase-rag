@@ -49,7 +49,6 @@ from typing import TYPE_CHECKING, Any
 
 from java_codebase_rag.config import retrieval_mode_from_env
 from java_codebase_rag.pipeline import (
-    RETRIEVAL_BM25_HINT,
     retrieval_bm25_hint,
     lexical_mode_label,
     vector_stack_installed,

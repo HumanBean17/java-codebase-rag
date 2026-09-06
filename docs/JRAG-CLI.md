@@ -22,7 +22,11 @@ JAVA_CODEBASE_RAG_LANGUAGE=ru jrag status # env tier
 Locale-independent by contract: exit codes, JSON object keys, envelope field
 names, `--format`/`--detail` values, and command/flag names never translate —
 only human-readable values do. The MCP server (`jrag-mcp`) is always English.
-Invalid values degrade to English with a stderr note. Precedence:
+Note on `watch --detach` under `ru`: the daemon child inherits the resolved
+language, so its warm-path `search`/absence messages render in that locale even
+for later `jrag find` calls that don't pass `--lang` (the cold in-process path
+follows the caller's own locale). Invalid values degrade to English with a
+stderr note. Precedence:
 `--lang` > `JAVA_CODEBASE_RAG_LANGUAGE` > YAML `language:` > `en`.
 
 ## Install and discovery

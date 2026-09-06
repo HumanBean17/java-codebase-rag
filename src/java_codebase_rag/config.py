@@ -419,7 +419,9 @@ class ResolvedOperatorConfig:
         os.environ["JAVA_CODEBASE_RAG_ABSENCE_NGRAM_Q"] = str(self.absence_ngram_q)
         os.environ["JAVA_CODEBASE_RAG_RETRIEVAL"] = self.retrieval
 
-    def subprocess_env(self, base: dict[str, str] | None = None, *, language: bool = False) -> dict[str, str]:
+    def subprocess_env(
+        self, base: dict[str, str] | None = None, *, language: bool = False
+    ) -> dict[str, str]:
         out = dict(base or os.environ)
         out[ENV_INDEX_DIR] = str(self.index_dir.resolve())
         out[ENV_SOURCE_ROOT] = str(self.source_root.resolve())

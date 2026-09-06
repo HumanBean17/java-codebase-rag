@@ -127,9 +127,10 @@ Precedence **CLI flag > env > YAML (`.java-codebase-rag.yml`) > default**; each 
 
 **Localization invariant.** `language: en|ru` resolves CLI > env
 (`JAVA_CODEBASE_RAG_LANGUAGE`) > YAML > default `en`, like every other knob —
-with one deliberate deviation: it is **never republished** to `os.environ` /
+with one deliberate deviation: it is **never auto-republished** to `os.environ` /
 `subprocess_env` (republished env is how MCP and daemon children learn resolved
-values). Locale is process state, set only by the CLI entrypoints; the MCP
+values); an explicit opt-in — `subprocess_env(language=True)` — exists for
+operator-facing children (watch daemon, watcher reprocess). Locale is process state, set only by the CLI entrypoints; the MCP
 server never sets it and scrubs the env var from its child spawns, so MCP
 responses stay byte-identical English regardless of the operator's CLI
 language. A dispatch-level `--lang` argv pre-scan strips before-verb tokens and

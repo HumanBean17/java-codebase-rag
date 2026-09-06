@@ -170,10 +170,8 @@ class ResolveOutput(BaseModel):
 def _resolve_validate_identifier(raw: str) -> tuple[str | None, str | None]:
     trimmed = raw.strip()
     if not trimmed:
-        from java_codebase_rag.i18n import tr
-
-        detail = tr("RS_DETAIL_EMPTY") if raw == "" else tr("RS_DETAIL_WS")
-        return None, tr("ERR_INVALID_IDENTIFIER", detail=detail)
+        detail = _tr("RS_DETAIL_EMPTY") if raw == "" else _tr("RS_DETAIL_WS")
+        return None, _tr("ERR_INVALID_IDENTIFIER", detail=detail)
     return trimmed, None
 
 

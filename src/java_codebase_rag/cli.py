@@ -398,14 +398,18 @@ def _cmd_init(args: argparse.Namespace) -> int:
         parent_config = find_yaml_config_file(parent_config_dir)
         if parent_config is not None:
             print(
-                f"Warning: found existing config at {parent_config}. "
-                f"Creating a new project here will create a separate index.",
+                tr(
+                    "MSG_WARN_EXISTING_CONFIG",
+                    path=parent_config,
+                ),
                 file=sys.stderr,
             )
         else:
             print(
-                f"Warning: found existing index at {parent_config_dir / '.java-codebase-rag'}. "
-                f"Creating a new project here will create a separate index.",
+                tr(
+                    "MSG_WARN_EXISTING_INDEX",
+                    path=parent_config_dir / ".java-codebase-rag",
+                ),
                 file=sys.stderr,
             )
     _startup_hints(cfg)
@@ -590,7 +594,9 @@ def _cmd_increment(args: argparse.Namespace) -> int:
                 result = json.loads(g.stdout.strip())
                 if result.get("mode") == "full_fallback":
                     print(
-                        "[increment] fell back to full graph rebuild — this is normal after schema changes or first run",
+                        tr(
+                            "MSG_INCREMENT_FALLBACK",
+                        ),
                         file=sys.stderr,
                         flush=True,
                     )
@@ -1249,17 +1255,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uc_stats.set_defaults(handler=_cmd_unresolved_calls_stats)
 
-    # ``--lang`` on every registered subparser (and sub-subparser), so the
-    # after-verb form parses on all verbs uniformly. The walk mirrors
-    # ``cli_dispatch._operator_subcommand_helps``'s _SubParsersAction pattern;
-    # direct per-parser calls would need touching every add_parser site above.
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            for choice_parser in action.choices.values():
-                if not any(
-                    act.dest == "lang" for act in choice_parser._actions
-                ):
-                    _add_lang_flag(choice_parser)
+    # ``--lang`` on every registered subparser AND sub-subparser
+    # (``unresolved-calls list|stats``), so the after-verb form parses on all
+    # verbs uniformly. The walk recurses through nested _SubParsersActions;
+    # the ``dest == "lang"`` guard makes re-visiting a parser a no-op.
+    def _register_lang_everywhere(root: argparse.ArgumentParser) -> None:
+        if any(act.dest == "lang" for act in root._actions):
+            return
+        _add_lang_flag(root)
+        for action in root._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for choice_parser in action.choices.values():
+                    _register_lang_everywhere(choice_parser)
+
+    _register_lang_everywhere(parser)
 
     return parser
 
@@ -1287,7 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
     except argparse.ArgumentError as exc:
         from java_codebase_rag.i18n import tr
 
-        print(f"{tr('LBL_JRAG_ERROR_STDERR')}{exc}", file=sys.stderr)
+        print(f"{tr('LBL_CLI_ARG_ERROR_STDERR')}{exc}", file=sys.stderr)
         return 2
     handler = getattr(args, "handler", None)
     if handler is None:

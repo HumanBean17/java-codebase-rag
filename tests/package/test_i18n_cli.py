@@ -69,7 +69,7 @@ def test_jrag_invalid_lang_rejected(capsys):
 
     assert rc == 2
     err = capsys.readouterr().err
-    assert err.strip() != ""
+    assert "fr" in err and "en" in err and "ru" in err  # choices named
 
 
 def test_env_drives_help_locale(capsys, monkeypatch):
@@ -307,9 +307,11 @@ def test_mcp_subprocess_env_scrubs_language(tmp_path, monkeypatch):
     assert env.get("JAVA_CODEBASE_RAG_SOURCE_ROOT") == str(tmp_path)
 
 
-def test_watcher_passes_language_to_child(tmp_path, monkeypatch):
-    """The watcher's reprocess children receive the resolved language via the
-    opt-in subprocess_env(language=True) seam (not config-wide republication)."""
+def test_subprocess_env_language_opt_in_from_yaml(tmp_path, monkeypatch):
+    """The subprocess_env(language=True) seam resolves the YAML language tier
+    (the watcher's reprocess children consume this seam at their spawn sites).
+    Pins the config-level boundary; the daemon spawn is pinned by the detach
+    capture test below."""
     from java_codebase_rag import config
 
     monkeypatch.delenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", raising=False)
@@ -439,3 +441,13 @@ def test_unified_help_russian_via_dispatch_subprocess(tmp_path):
         capture_output=True, text=True, cwd=str(tmp_path),
     )
     assert "Здоровье и свежесть индекса" in out2.stdout
+
+
+def test_lang_after_sub_subcommand_verb(capsys):
+    """Regression: the flag-registration walk must recurse into sub-subparsers
+    (`unresolved-calls list|stats`) — D3's after-verb contract."""
+    for sub in ("list", "stats"):
+        rc = cli.main(["unresolved-calls", sub, "--lang", "ru", "--help"])
+        assert rc == 0, sub
+        out = capsys.readouterr().out
+        assert "Язык интерфейса" in out, sub

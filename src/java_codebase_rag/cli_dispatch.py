@@ -253,7 +253,6 @@ def _console_script_main() -> None:
         strip_lang_before_verb,
     )
 
-    maybe_warn_legacy_alias()
     lang_value, stripped = strip_lang_before_verb(
         sys.argv[1:], OPERATOR_VERBS | AGENT_VERBS
     )
@@ -261,6 +260,8 @@ def _console_script_main() -> None:
         sys.argv = [sys.argv[0], *stripped]
         set_cli_lang_override(lang_value)
     init_help_locale(lang_value)
+    # After locale init so the legacy-alias deprecation notice localizes too.
+    maybe_warn_legacy_alias()
     if _invoked_program_name() == "jrag" and _is_unified_help_request():
         _print_unified_help()
         return

@@ -21,7 +21,7 @@ from java_codebase_rag import i18n_messages_ru
 
 _SRC_ROOT = Path(__file__).resolve().parent.parent.parent / "src" / "java_codebase_rag"
 
-_TR_CALL_RE = re.compile(r"\b[n]?tr\(\s*\"([A-Z0-9_]+)\"")
+_TR_CALL_RE = re.compile(r"\b_?n?tr\(\s*[\"']([A-Z0-9_]+)[\"']")
 
 
 @pytest.fixture(autouse=True)
@@ -197,3 +197,103 @@ def test_tr_call_sites_use_known_keys():
             if key not in known:
                 offenders.append(f"{path.name}: {key}")
     assert not offenders, f"tr/ntr call sites with unknown keys: {offenders}"
+
+
+# ----- Review follow-up hardening --------------------------------------------
+
+
+def test_ntr_english_fallback_for_locale_forms(monkeypatch):
+    """A plural key missing from the RU catalog degrades to EN — including
+    when the locale form (few/many) does not exist in the EN entry."""
+    monkeypatch.delitem(i18n_messages_ru.MESSAGES, "MSG_AMBIGUOUS_CANDIDATES")
+    monkeypatch.setitem(
+        i18n_messages_en.MESSAGES,
+        "MSG_TEST_FALLBACK_PLURAL",
+        {"one": "{n} item", "other": "{n} items"},
+    )
+    i18n.set_locale("ru")
+    try:
+        assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 5) == "5 candidates"
+        assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 2) == "2 candidates"
+        assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 1) == "1 candidate"
+        assert i18n.ntr("MSG_TEST_FALLBACK_PLURAL", 5) == "5 items"
+    finally:
+        i18n.reset_locale()
+
+
+def test_ntr_missing_form_in_complete_catalog_raises(monkeypatch):
+    """When the ACTIVE locale's own catalog has the key but lacks the form,
+    the error stays loud (a real translation gap, not a fallback case)."""
+    monkeypatch.setitem(
+        i18n_messages_en.MESSAGES,
+        "MSG_TEST_BAD_PLURAL",
+        {"one": "{n} x"},
+    )
+    with pytest.raises(KeyError):
+        i18n.ntr("MSG_TEST_BAD_PLURAL", 5)
+
+
+def test_catalog_no_duplicate_keys():
+    """A duplicated key in a dict literal silently overrides — catch it via
+    AST on the catalog sources (dict literals, not the loaded module)."""
+    import ast
+
+    for name in (
+        "i18n_messages_en",
+        "i18n_messages_ru",
+        "i18n_messages_help_en",
+        "i18n_messages_help_ru",
+    ):
+        src = (_SRC_ROOT / f"{name}.py").read_text()
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                keys = [
+                    k.value
+                    for k in node.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                ]
+                dupes = sorted({k for k in keys if keys.count(k) > 1})
+                assert not dupes, f"{name}: duplicate keys {dupes}"
+
+
+def _template_placeholders(value):
+    if isinstance(value, dict):
+        union: set[str] = set()
+        for t in value.values():
+            union |= set(re.findall(r"{([a-zA-Z_][a-zA-Z0-9_]*)}", t))
+        return union
+    return set(re.findall(r"{([a-zA-Z_][a-zA-Z0-9_]*)}", value))
+
+
+def _unescape_braces(value):
+    if isinstance(value, dict):
+        return {f: t.replace("{{", "{").replace("}}", "}") for f, t in value.items()}
+    return value.replace("{{", "{").replace("}}", "}")
+
+
+def test_catalog_placeholder_parity():
+    """EN and RU templates must carry the same {placeholder} set — a missing
+    one silently drops the value from RU output (format never errors)."""
+    for label, en, ru in (
+        ("runtime", i18n_messages_en.MESSAGES, i18n_messages_ru.MESSAGES),
+        ("help", i18n_messages_help_en.MESSAGES, i18n_messages_help_ru.MESSAGES),
+    ):
+        for key in sorted(set(en) & set(ru)):
+            e = _template_placeholders(_unescape_braces(en[key]))
+            r = _template_placeholders(_unescape_braces(ru[key]))
+            assert e == r, f"{label}/{key}: EN {sorted(e)} != RU {sorted(r)}"
+
+
+def test_shared_producer_keys_render_russian():
+    """Every ABS_*/RS_* entry renders under ru (format placeholders resolve)."""
+    for key in sorted(
+        k for k in i18n_messages_en.MESSAGES if k.startswith(("ABS_", "RS_"))
+    ):
+        ph = _template_placeholders(i18n_messages_ru.MESSAGES[key])
+        i18n.set_locale("ru")
+        try:
+            out = i18n.tr(key, **{p: "X" for p in ph})
+        finally:
+            i18n.reset_locale()
+        assert isinstance(out, str) and out, key

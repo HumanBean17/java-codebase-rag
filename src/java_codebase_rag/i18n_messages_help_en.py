@@ -1,7 +1,10 @@
 """English argparse-help catalog (HELP_* keys).
 
 Extracted from the pre-i18n literals (byte-exact) by the Task 10 migration;
-shared flag strings share one key across parsers and files.
+shared flag strings share one key across parsers and files. Sequentially
+numbered ``HELP_MISC_N`` keys carry description/epilog blocks with no natural
+flag or command anchor — the number is the stability contract; renaming to a
+mnemonic is safe only in the same commit as its call site.
 """
 from __future__ import annotations
 

@@ -25,7 +25,6 @@ resolution.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -120,16 +119,25 @@ def ntr(key: str, n: int, **kwargs: Any) -> str:
 
     Catalog values for plural keys are dicts of forms (en: one/other;
     ru: one/few/many). ``n`` is injected into the template's placeholders
-    automatically.
+    automatically. When the winning catalog is an EN fallback (the active
+    locale lacks the key), the locale-specific form (few/many) maps to
+    EN's ``other`` — the same degrade-to-English promise ``tr`` makes.
     """
-    for catalog in _catalogs_for(_locale):
+    catalogs = _catalogs_for(_locale)
+    for idx, catalog in enumerate(catalogs):
         if key in catalog:
             value = catalog[key]
             if not isinstance(value, dict):
                 raise KeyError(f"i18n: key {key!r} is not a plural entry")
             form = plural_form(_locale, n)
+            is_en_fallback = _locale != "en" and idx >= 2
             if form not in value:
-                raise KeyError(f"i18n: plural key {key!r} lacks form {form!r}")
+                if is_en_fallback and "other" in value:
+                    form = "other"
+                else:
+                    raise KeyError(
+                        f"i18n: plural key {key!r} lacks form {form!r}"
+                    )
             return value[form].format(n=n, **kwargs)
     raise KeyError(key)
 

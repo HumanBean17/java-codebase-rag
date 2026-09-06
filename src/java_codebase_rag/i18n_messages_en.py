@@ -1,6 +1,8 @@
 """English runtime catalog (MSG_/ERR_/LBL_/HINT_ keys).
 
-Values are ``str`` templates (``{placeholder}`` formatting) or, for plural
+Key namespaces beyond the core MSG_/ERR_/LBL_/HINT_ set: WARN_ (envelope
+warnings), INST_ (installer wizard), RS_/ABS_ (shared resolve/absence
+producers). Values are ``str`` templates (``{placeholder}`` formatting) or, for plural
 keys, dicts of forms (en: ``one``/``other``). EN entries are the byte-exact
 pre-i18n strings — golden payloads and render tests pin them.
 """
@@ -309,4 +311,114 @@ MESSAGES: dict[str, Any] = {
     ),
     "ABS_CAPABILITY_TAIL_FIND": " For symbol discovery use `find`/`search` instead.",
     "ABS_UNABLE": "Unable to diagnose the empty result; refine the query and retry.",
+    # Review follow-up: remaining installer/jrag/cli operator strings.
+    "INST_ERR_NO_JAVA": (
+        "Error: No Java build files (pom.xml, build.gradle, build.gradle.kts, "
+        "build.sbt) found in {root} or its subtree."
+    ),
+    "INST_PROMPT_SOURCE_ROOT": "Source root:",
+    "INST_MODEL_NOT_FOUND_CONFIRM": "Model path {model} not found. Use 'auto' instead?",
+    "INST_PROMPT_MODEL": "Enter model path (or 'auto'):",
+    "INST_PROMPT_MODEL_FULL": "Embedding model path (or 'auto'):",
+    "INST_PROMPT_SCOPE": "Select installation scope:",
+    "INST_NOTE_SURFACE_CLI": (
+        "Note: 'cli' surface deploys the `jrag` console-script skill+subagent "
+        "(one command per intent, no MCP server) — recommended."
+    ),
+    "INST_NOTE_SURFACE_MCP": (
+        "      'mcp' surface registers the java-codebase-rag MCP server "
+        "(5 tools: search/find/describe/neighbors/resolve)."
+    ),
+    "INST_PROMPT_SURFACE": "Select agent surface:",
+    "INST_ERR_BINARY_NOT_FOUND": "Error: `{name}` not found on PATH.",
+    "INST_ENSURE_JRAG": (
+        "Ensure `jrag` is installed, then re-run with `--non-interactive --agent <host>`."
+    ),
+    "INST_ENSURE_CONSOLE": (
+        "Ensure the `jrag` console script is installed, "
+        "then re-run with `--non-interactive --agent <host>`."
+    ),
+    "INST_WARN_BINARY_NOT_FOUND": "Warning: `{name}` not found on PATH.",
+    "INST_PROMPT_BINARY_PATH": "Enter the full path to {name} (or 'abort'):",
+    "INST_ERR_NOT_A_FILE": "Error: Path {path} does not exist or is not a file.",
+    "INST_WARN_NOT_EXECUTABLE": "Warning: {path} is not executable. This may cause issues.",
+    "INST_ERR_COCO": "Error: CocoIndex update failed with code {code}",
+    "INST_ERR_AST": "Error: AST graph build failed with code {code}",
+    "INST_VECTORS_SKIPPED_INSTALL": (
+        "jrag: vectors skipped — vector stack not installed on this "
+        "platform (graph-only mode). Building graph only; semantic search is unavailable."
+    ),
+    "INST_VECTORS_SKIPPED_UPDATE": (
+        "jrag: vectors skipped — vector stack not installed on this "
+        "platform (graph-only mode). Running graph catch-up only."
+    ),
+    "INST_PROMPT_CHOOSE_ACTION": "Choose an action:",
+    "INST_WARN_MARKER_WRITE": "Warning: failed to write {path}: {exc}",
+    "INST_WOULD_UPDATE_FILE": "Would update {kind} file at {path}",
+    "INST_WOULD_CREATE_FILE": "Would create {kind} file at {path}",
+    "INST_UPDATED_FILE": "Updated {kind} file at {path}",
+    "INST_WOULD_UPDATE_MCP": "Would update MCP config at {path}",
+    "INST_UPDATED_MCP": "Updated MCP config at {path}",
+    "INST_WOULD_REMOVE_MCP": "Would remove MCP entry from {path}",
+    "INST_REMOVED_MCP": "Removed MCP entry from {path}",
+    "INST_WOULD_REMOVE_FILE": "Would remove {path}",
+    "INST_REMOVED_FILE": "Removed {path}",
+    "INST_NO_HOSTS": "No configured agent hosts found.",
+    "INST_RUN_INSTALL_FIRST": "Run `jrag install` first.",
+    "INST_FOUND_HOSTS": "Found {n} configured host(s).",
+    "INST_NOTE_MULTI_SURFACE_OWN": (
+        "Note: configured hosts span multiple surfaces ({surfaces}); "
+        "refreshing each on its own recorded surface (pass --surface to normalize)."
+    ),
+    "INST_NOTE_MULTI_SURFACE_NORMALIZE": (
+        "Note: configured hosts span multiple surfaces ({surfaces}); "
+        "normalizing to '{surface}'."
+    ),
+    "INST_ERR_MIGRATE_BINARY": (
+        "Error: `{name}` not found on PATH — cannot migrate to the '{surface}' surface."
+    ),
+    "INST_ENSURE_MIGRATE": (
+        "Ensure `jrag` is installed, then re-run `update --surface {surface}`."
+    ),
+    "INST_MIGRATING": "\nMigrating {name} ({scope} scope): {from_s} → {to_s}...",
+    "INST_WOULD_TEAR_DOWN": (
+        "  Would tear down {from_s} artifacts and deploy {to_s} artifacts."
+    ),
+    "INST_REFRESHING": "\nRefreshing {name} ({scope} scope, surface={surface})...",
+    "INST_ERR_LANCE": "Error: Lance index update failed with code {code}",
+    "INST_WARN_INCREMENTAL_GRAPH": (
+        "\nWarning: incremental graph update failed (exit {code}). "
+        "Run `jrag reprocess` for a full rebuild."
+    ),
+    "INST_SKIP_MODEL_GRAPH_ONLY": (
+        "Skipping embedding model selection: vector stack not installed on this "
+        "platform (graph-only mode)."
+    ),
+    "INST_SKIP_MODEL_BM25": (
+        "Skipping embedding model selection: retrieval mode is bm25 "
+        "(keyword search; no model needed)."
+    ),
+    "INST_ERR_DIR_NOT_WRITABLE": "Directory not writable: {path}",
+    "INST_ERR_WRITE_FAILED": "Failed to write {path}: {exc}",
+    "INST_ERR_REMOVE_FAILED": "Failed to remove {path}: {exc}",
+    # jrag/cli residue.
+    "MSG_VOCAB_REBUILT": "Vocabulary index rebuilt successfully:",
+    "MSG_VOCAB_SYMBOL_COUNT": "  Symbol count: {n}",
+    "MSG_VOCAB_SIDECAR": "  Sidecar path: {path}",
+    "ERR_VOCAB_SAVE_FAILED": "[error] Failed to save vocabulary index: {exc}",
+    "MSG_WATCH_NOT_RUNNING": "jrag watch: not running",
+    "MSG_PRIME_STDERR": "jrag prime: {msg}",
+    "MSG_WARN_EXISTING_CONFIG": (
+        "Warning: found existing config at {path}. "
+        "Creating a new project here will create a separate index."
+    ),
+    "MSG_WARN_EXISTING_INDEX": (
+        "Warning: found existing index at {path}. "
+        "Creating a new project here will create a separate index."
+    ),
+    "LBL_CLI_ARG_ERROR_STDERR": "jrag: ",
+    "MSG_INCREMENT_FALLBACK": (
+        "[increment] fell back to full graph rebuild — this is normal after "
+        "schema changes or first run"
+    ),
 }

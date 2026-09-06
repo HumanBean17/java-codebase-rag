@@ -97,7 +97,7 @@ MESSAGES: dict[str, Any] = {
         "many": "{n} кандидатов",
     },
     # Auto-scope notices (stderr line + envelope warnings[] value).
-    "MSG_AUTO_SCOPE_STDERR": "[jrag] auto-scope: --service {svc} (cwd)",
+    "MSG_AUTO_SCOPE_STDERR": "[jrag] auto-scope: --service {svc} (по cwd)",
     "WARN_AUTO_SCOPE": (
         "auto-scope: --service {svc} (определён по cwd; "
         "передайте --no-auto-scope, чтобы отключить)"
@@ -318,4 +318,114 @@ MESSAGES: dict[str, Any] = {
     ),
     "ABS_CAPABILITY_TAIL_FIND": " Для поиска символов используйте `find`/`search`.",
     "ABS_UNABLE": "Не удалось диагностировать пустой результат; уточните запрос и повторите.",
+    # Review follow-up: remaining installer/jrag/cli operator strings.
+    "INST_ERR_NO_JAVA": (
+        "Ошибка: файлы сборки Java (pom.xml, build.gradle, build.gradle.kts, "
+        "build.sbt) не найдены в {root} и его поддереве."
+    ),
+    "INST_PROMPT_SOURCE_ROOT": "Корень исходников:",
+    "INST_MODEL_NOT_FOUND_CONFIRM": "Путь модели {model} не найден. Использовать 'auto'?",
+    "INST_PROMPT_MODEL": "Введите путь к модели (или 'auto'):",
+    "INST_PROMPT_MODEL_FULL": "Путь к модели эмбеддингов (или 'auto'):",
+    "INST_PROMPT_SCOPE": "Выберите область установки:",
+    "INST_NOTE_SURFACE_CLI": (
+        "Примечание: поверхность 'cli' разворачивает skill+subagent консольной "
+        "команды `jrag` (по одной команде на намерение, без MCP-сервера) — рекомендована."
+    ),
+    "INST_NOTE_SURFACE_MCP": (
+        "      поверхность 'mcp' регистрирует MCP-сервер java-codebase-rag "
+        "(5 инструментов: search/find/describe/neighbors/resolve)."
+    ),
+    "INST_PROMPT_SURFACE": "Выберите поверхность агента:",
+    "INST_ERR_BINARY_NOT_FOUND": "Ошибка: `{name}` не найден в PATH.",
+    "INST_ENSURE_JRAG": (
+        "Установите `jrag`, затем повторите с `--non-interactive --agent <host>`."
+    ),
+    "INST_ENSURE_CONSOLE": (
+        "Установите консольную команду `jrag`, "
+        "затем повторите с `--non-interactive --agent <host>`."
+    ),
+    "INST_WARN_BINARY_NOT_FOUND": "Предупреждение: `{name}` не найден в PATH.",
+    "INST_PROMPT_BINARY_PATH": "Введите полный путь к {name} (или 'abort'):",
+    "INST_ERR_NOT_A_FILE": "Ошибка: путь {path} не существует или не является файлом.",
+    "INST_WARN_NOT_EXECUTABLE": "Предупреждение: {path} не исполняемый. Возможны проблемы.",
+    "INST_ERR_COCO": "Ошибка: обновление CocoIndex завершилось с кодом {code}",
+    "INST_ERR_AST": "Ошибка: сборка AST-графа завершилась с кодом {code}",
+    "INST_VECTORS_SKIPPED_INSTALL": (
+        "jrag: векторы пропущены — векторный стек не установлен на этой платформе "
+        "(режим graph-only). Строится только граф; семантический поиск недоступен."
+    ),
+    "INST_VECTORS_SKIPPED_UPDATE": (
+        "jrag: векторы пропущены — векторный стек не установлен на этой платформе "
+        "(режим graph-only). Выполняется только догон графа."
+    ),
+    "INST_PROMPT_CHOOSE_ACTION": "Выберите действие:",
+    "INST_WARN_MARKER_WRITE": "Предупреждение: не удалось записать {path}: {exc}",
+    "INST_WOULD_UPDATE_FILE": "Файл {kind} был бы обновлён в {path}",
+    "INST_WOULD_CREATE_FILE": "Файл {kind} был бы создан в {path}",
+    "INST_UPDATED_FILE": "Файл {kind} обновлён в {path}",
+    "INST_WOULD_UPDATE_MCP": "Конфигурация MCP была бы обновлена в {path}",
+    "INST_UPDATED_MCP": "Конфигурация MCP обновлена в {path}",
+    "INST_WOULD_REMOVE_MCP": "Запись MCP была бы удалена из {path}",
+    "INST_REMOVED_MCP": "Запись MCP удалена из {path}",
+    "INST_WOULD_REMOVE_FILE": "Было бы удалено: {path}",
+    "INST_REMOVED_FILE": "Удалено: {path}",
+    "INST_NO_HOSTS": "Настроенные агентские хосты не найдены.",
+    "INST_RUN_INSTALL_FIRST": "Сначала выполните `jrag install`.",
+    "INST_FOUND_HOSTS": "Найдено настроенных хостов: {n}.",
+    "INST_NOTE_MULTI_SURFACE_OWN": (
+        "Примечание: настроенные хосты охватывают несколько поверхностей ({surfaces}); "
+        "каждая обновляется на своей записанной поверхности (передайте --surface для нормализации)."
+    ),
+    "INST_NOTE_MULTI_SURFACE_NORMALIZE": (
+        "Примечание: настроенные хосты охватывают несколько поверхностей ({surfaces}); "
+        "нормализация к '{surface}'."
+    ),
+    "INST_ERR_MIGRATE_BINARY": (
+        "Ошибка: `{name}` не найден в PATH — миграция на поверхность '{surface}' невозможна."
+    ),
+    "INST_ENSURE_MIGRATE": (
+        "Установите `jrag`, затем повторите `update --surface {surface}`."
+    ),
+    "INST_MIGRATING": "\nМиграция {name} (область {scope}): {from_s} → {to_s}...",
+    "INST_WOULD_TEAR_DOWN": (
+        "  Артефакты {from_s} были бы снесены, артефакты {to_s} развёрнуты."
+    ),
+    "INST_REFRESHING": "\nОбновление {name} (область {scope}, surface={surface})...",
+    "INST_ERR_LANCE": "Ошибка: обновление индекса Lance завершилось с кодом {code}",
+    "INST_WARN_INCREMENTAL_GRAPH": (
+        "\nПредупреждение: инкрементальное обновление графа не удалось (код {code}). "
+        "Запустите `jrag reprocess` для полной пересборки."
+    ),
+    "INST_SKIP_MODEL_GRAPH_ONLY": (
+        "Выбор модели эмбеддингов пропущен: векторный стек не установлен на этой "
+        "платформе (режим graph-only)."
+    ),
+    "INST_SKIP_MODEL_BM25": (
+        "Выбор модели эмбеддингов пропущен: режим retrieval bm25 "
+        "(поиск по ключевым словам; модель не нужна)."
+    ),
+    "INST_ERR_DIR_NOT_WRITABLE": "Каталог недоступен для записи: {path}",
+    "INST_ERR_WRITE_FAILED": "Не удалось записать {path}: {exc}",
+    "INST_ERR_REMOVE_FAILED": "Не удалось удалить {path}: {exc}",
+    # jrag/cli residue.
+    "MSG_VOCAB_REBUILT": "Индекс словаря перестроен успешно:",
+    "MSG_VOCAB_SYMBOL_COUNT": "  Количество символов: {n}",
+    "MSG_VOCAB_SIDECAR": "  Путь сайдкара: {path}",
+    "ERR_VOCAB_SAVE_FAILED": "[ошибка] Не удалось сохранить индекс словаря: {exc}",
+    "MSG_WATCH_NOT_RUNNING": "jrag watch: не запущен",
+    "MSG_PRIME_STDERR": "jrag prime: {msg}",
+    "MSG_WARN_EXISTING_CONFIG": (
+        "Предупреждение: найдена существующая конфигурация в {path}. "
+        "Создание нового проекта здесь создаст отдельный индекс."
+    ),
+    "MSG_WARN_EXISTING_INDEX": (
+        "Предупреждение: найден существующий индекс в {path}. "
+        "Создание нового проекта здесь создаст отдельный индекс."
+    ),
+    "LBL_CLI_ARG_ERROR_STDERR": "jrag: ошибка: ",
+    "MSG_INCREMENT_FALLBACK": (
+        "[increment] выполнен откат к полной пересборке графа — это нормально "
+        "после изменения схемы или первого запуска"
+    ),
 }

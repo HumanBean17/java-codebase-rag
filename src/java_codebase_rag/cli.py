@@ -27,6 +27,7 @@ from java_codebase_rag.config import (
 )
 from java_codebase_rag._fdlimit import raise_fd_limit
 from java_codebase_rag._version import version_string
+from java_codebase_rag.i18n import tr
 from java_codebase_rag.pipeline import (
     RETRIEVAL_BM25_HINT as _RETRIEVAL_BM25_HINT,
     VECTORS_SKIPPED_BM25 as _VECTORS_SKIPPED_BM25,
@@ -348,10 +349,10 @@ def _startup_hints(cfg: ResolvedOperatorConfig) -> None:
 
 
 def _add_index_embedding_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--source-root", type=str, default=None, help="Java repository root (default: cwd)")
-    p.add_argument("--index-dir", type=str, default=None, help="Index directory (Lance + LadybugDB + cocoindex state)")
-    p.add_argument("--embedding-model", type=str, default=None, help="Override SBERT_MODEL / YAML embedding.model")
-    p.add_argument("--embedding-device", type=str, default=None, help="Override SBERT_DEVICE / YAML embedding.device")
+    p.add_argument("--source-root", type=str, default=None, help=tr("HELP_FLAG_SOURCE_ROOT"))
+    p.add_argument("--index-dir", type=str, default=None, help=tr("HELP_MISC_73"))
+    p.add_argument("--embedding-model", type=str, default=None, help=tr("HELP_FLAG_EMBEDDING_MODEL"))
+    p.add_argument("--embedding-device", type=str, default=None, help=tr("HELP_FLAG_EMBEDDING_DEVICE"))
 
 
 def _add_verbosity_flags(p: argparse.ArgumentParser) -> None:
@@ -360,13 +361,13 @@ def _add_verbosity_flags(p: argparse.ArgumentParser) -> None:
         "--quiet", "-q",
         action="store_true",
         dest="quiet",
-        help="Suppress stderr progress relay; stdout payload unchanged.",
+        help=tr("HELP_FLAG_QUIET"),
     )
     g.add_argument(
         "--verbose", "-v",
         action="store_true",
         dest="verbose",
-        help="Show full subprocess output (Lance warnings, brownfield events, progress bars).",
+        help=tr("HELP_FLAG_VERBOSE"),
     )
 
 
@@ -1044,24 +1045,7 @@ def _cmd_analyze_pr(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    description = (
-        "jrag — graph-native code intelligence for Java microservices.\n\n"
-        "Lifecycle commands stream subprocess progress to stderr (including relayed child stdout); "
-        "--quiet suppresses that stream; stdout remains the machine-readable payload.\n\n"
-        "Lifecycle (manage the index):\n"
-        "  init            Create a fresh index from a Java repository.\n"
-        "  increment       Pick up changes since the last index update (Lance + graph).\n"
-        "  reprocess       Full vector + graph rebuild (default); optional --vectors-only / --graph-only.\n"
-        "  erase           Delete the index from disk.\n\n"
-        "Introspection (inspect the index):\n"
-        "  meta            Print ontology version, edge counts, and table summary.\n"
-        "  tables          List Lance tables and row counts.\n"
-        "  diagnose-ignore Show which ignore-pattern layer decided a path's fate.\n"
-        "  unresolved-calls  List or aggregate receiver-failure call sites (not in CALLS).\n\n"
-        "Analysis (work with code changes):\n"
-        "  analyze-pr      Compute blast-radius + risk score for a unified diff.\n\n"
-        "Run `jrag <command> --help` for command-specific options."
-    )
+    description = tr("HELP_DESC_CLI_MAIN")
     parser = argparse.ArgumentParser(
         prog="java-codebase-rag",
         description=description,
@@ -1077,10 +1061,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser(
         "init",
-        help="Create a fresh index from a Java repository.",
+        help=tr("HELP_CMD_INIT"),
         description=(
-            "First-time index creation. Refuses if the resolved index directory "
-            "already contains a LadybugDB graph or Lance tables. Exit 2 on refusal."
+            tr("HELP_MISC_74")
         ),
     )
     _add_index_embedding_flags(init)
@@ -1089,48 +1072,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     install = subparsers.add_parser(
         "install",
-        help="Interactive setup wizard: config, agent-surface registration, indexing.",
+        help=tr("HELP_CMD_INSTALL"),
         description=(
-            "Interactive setup wizard that guides users through: Java source detection, "
-            "embedding model selection, agent host configuration, agent-surface wiring "
-            "(SessionStart prime hook on the cli surface, stdio MCP server entry on the "
-            "mcp surface — no skill/agent files deployed), and YAML config generation. "
-            "Use --non-interactive for CI/automation."
+            tr("HELP_MISC_75")
         ),
     )
     install.add_argument(
         "--non-interactive",
         action="store_true",
-        help="Run without prompts (requires --agent).",
+        help=tr("HELP_FLAG_NON_INTERACTIVE"),
     )
     install.add_argument(
         "--agent",
         choices=["claude-code", "qwen-code", "gigacode"],
         default=[],
         action="append",
-        help="Agent host to configure (can be passed multiple times).",
+        help=tr("HELP_FLAG_AGENT"),
     )
     install.add_argument(
         "--scope",
         choices=["project", "user"],
         default=None,
-        help="Installation scope (default: project).",
+        help=tr("HELP_FLAG_SCOPE"),
     )
     install.add_argument(
         "--model",
         type=str,
         default=None,
-        help="Embedding model path or 'auto' (default: auto).",
+        help=tr("HELP_FLAG_MODEL"),
     )
     install.add_argument(
         "--retrieval",
         choices=["vectors", "bm25"],
         default=None,
         help=(
-            "Retrieval mode: 'vectors' (semantic search; requires an embedding model "
-            "— auto-downloaded from Hugging Face or a local path) or 'bm25' "
-            "(keyword search; no model, no downloads, works offline). "
-            "Default: vectors."
+            tr("HELP_FLAG_RETRIEVAL")
         ),
     )
     install.add_argument(
@@ -1138,10 +1114,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["mcp", "cli"],
         default=None,
         help=(
-            "Agent surface to install: 'cli' (jrag console-script + SessionStart "
-            "prime hook, no files deployed) or 'mcp' (stdio MCP server entry, "
-            "tools only, no skill/agent artifacts). Omit to choose interactively; "
-            "non-interactive mode defaults to 'cli'."
+            tr("HELP_FLAG_SURFACE")
         ),
     )
     _add_verbosity_flags(install)
@@ -1149,37 +1122,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     update = subparsers.add_parser(
         "update",
-        help="Refresh the deployed surface (MCP entry / prime hook) after pip upgrade.",
+        help=tr("HELP_CMD_UPDATE"),
         description=(
-            "Post-upgrade refresh: brings the deployed surface's entry up to date — "
-            "the MCP server command path on the mcp surface, the SessionStart prime "
-            "hook command on the cli surface. If an index exists, also runs an "
-            "incremental Lance + graph catch-up (same as `increment`). Use --dry-run "
-            "to preview changes without writing. Pass --surface to switch between "
-            "the mcp and cli surfaces (migrates artifacts + marker). Requires a "
-            "prior `install` run."
+            tr("HELP_MISC_76")
         ),
     )
     update.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite all artifacts even if content matches.",
+        help=tr("HELP_FLAG_FORCE"),
     )
     update.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print changes without writing files.",
+        help=tr("HELP_FLAG_DRY_RUN"),
     )
     update.add_argument(
         "--surface",
         choices=["mcp", "cli"],
         default=None,
         help=(
-            "Switch agent surface: 'cli' (jrag console-script + SessionStart prime "
-            "hook, no files deployed) or 'mcp' (stdio MCP server entry, tools only, "
-            "no skill/agent artifacts). Tears down the old surface's artifacts and "
-            "deploys the new surface's (also rewrites the install marker). Omit to "
-            "keep the current surface; on a TTY you'll be prompted."
+            tr("HELP_MISC_77")
         ),
     )
     _add_verbosity_flags(update)
@@ -1187,24 +1150,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     increment = subparsers.add_parser(
         "increment",
-        help="Pick up changes since the last index update.",
-        description="Runs cocoindex catch-up and incremental LadybugDB graph update. Use --vectors-only to skip graph update.",
+        help=tr("HELP_CMD_INCREMENT"),
+        description=tr("HELP_MISC_78"),
     )
     _add_index_embedding_flags(increment)
     _add_verbosity_flags(increment)
     increment.add_argument(
         "--vectors-only",
         action="store_true",
-        help="Run only cocoindex catch-up (Lance); skip graph update.",
+        help=tr("HELP_FLAG_VECTORS_ONLY"),
     )
     increment.set_defaults(handler=_cmd_increment)
 
     reprocess = subparsers.add_parser(
         "reprocess",
-        help="Rebuild vectors and/or LadybugDB (default: both full phases).",
+        help=tr("HELP_CMD_REPROCESS"),
         description=(
-            "Default: full Lance reprocess (cocoindex --full-reprocess) then full LadybugDB graph rebuild. "
-            "Use --vectors-only or --graph-only to run a single phase (mutually exclusive)."
+            tr("HELP_MISC_79")
         ),
     )
     _add_index_embedding_flags(reprocess)
@@ -1213,42 +1175,42 @@ def build_parser() -> argparse.ArgumentParser:
     _rex.add_argument(
         "--vectors-only",
         action="store_true",
-        help="Run only the Lance/cocoindex full reprocess phase (no graph builder).",
+        help=tr("HELP_MISC_80"),
     )
     _rex.add_argument(
         "--graph-only",
         action="store_true",
-        help="Run only build_ast_graph.py (no cocoindex / Lance reprocess).",
+        help=tr("HELP_FLAG_GRAPH_ONLY"),
     )
     reprocess.set_defaults(handler=_cmd_reprocess)
 
     erase = subparsers.add_parser(
         "erase",
-        help="Delete the index from disk.",
-        description="Runs cocoindex drop, removes LadybugDB, and drops Lance tables. Requires --yes or TTY confirmation.",
+        help=tr("HELP_CMD_ERASE"),
+        description=tr("HELP_MISC_81"),
     )
     _add_index_embedding_flags(erase)
-    erase.add_argument("--yes", action="store_true", help="Confirm destructive deletion (required in CI)")
+    erase.add_argument("--yes", action="store_true", help=tr("HELP_FLAG_YES"))
     _add_verbosity_flags(erase)
     erase.set_defaults(handler=_cmd_erase)
 
-    meta = subparsers.add_parser("meta", help="Print graph meta and embedding resolution.")
+    meta = subparsers.add_parser("meta", help=tr("HELP_CMD_META"))
     _add_index_embedding_flags(meta)
     meta.set_defaults(handler=_cmd_meta)
 
-    tables = subparsers.add_parser("tables", help="List Lance tables and row counts.")
+    tables = subparsers.add_parser("tables", help=tr("HELP_CMD_TABLES"))
     _add_index_embedding_flags(tables)
     tables.set_defaults(handler=_cmd_tables)
 
     diagnose = subparsers.add_parser(
         "diagnose-ignore",
-        help="Show which ignore-pattern layer decided the fate of a path.",
+        help=tr("HELP_CMD_DIAGNOSE_IGNORE"),
     )
     _add_index_embedding_flags(diagnose)
     diagnose.add_argument("path", type=str)
     diagnose.set_defaults(handler=_cmd_diagnose_ignore)
 
-    analyze = subparsers.add_parser("analyze-pr", help="Blast-radius + risk score for a unified diff.")
+    analyze = subparsers.add_parser("analyze-pr", help=tr("HELP_CMD_ANALYZE_PR"))
     _add_index_embedding_flags(analyze)
     group = analyze.add_mutually_exclusive_group(required=True)
     group.add_argument("--diff-file", type=str)
@@ -1257,27 +1219,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     unresolved = subparsers.add_parser(
         "unresolved-calls",
-        help="List or aggregate UnresolvedCallSite rows (receiver-failure call sites).",
+        help=tr("HELP_CMD_UNRESOLVED_CALLS"),
     )
     _add_index_embedding_flags(unresolved)
     unresolved_sub = unresolved.add_subparsers(dest="unresolved_command", required=True)
 
-    uc_list = unresolved_sub.add_parser("list", help="List unresolved call sites.")
+    uc_list = unresolved_sub.add_parser("list", help=tr("HELP_CMD_LIST"))
     _add_index_embedding_flags(uc_list)
-    uc_list.add_argument("--method-id", type=str, default=None, help="Caller Symbol id")
+    uc_list.add_argument("--method-id", type=str, default=None, help=tr("HELP_FLAG_METHOD_ID"))
     uc_list.add_argument(
         "--reason",
         type=str,
         default=None,
         choices=sorted(VALID_UNRESOLVED_CALL_REASONS),
-        help="Filter by UnresolvedCallSite.reason",
+        help=tr("HELP_FLAG_REASON"),
     )
     uc_list.add_argument("--microservice", type=str, default=None)
     uc_list.add_argument("--callee-simple", type=str, default=None, dest="callee_simple")
     uc_list.add_argument("--limit", type=int, default=100)
     uc_list.set_defaults(handler=_cmd_unresolved_calls_list)
 
-    uc_stats = unresolved_sub.add_parser("stats", help="Aggregate unresolved call site counts.")
+    uc_stats = unresolved_sub.add_parser("stats", help=tr("HELP_CMD_STATS"))
     _add_index_embedding_flags(uc_stats)
     uc_stats.add_argument(
         "--by",

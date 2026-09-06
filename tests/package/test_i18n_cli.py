@@ -360,3 +360,82 @@ def test_detach_spawn_env_carries_language(tmp_path, monkeypatch):
 
     assert rc == 2
     assert captured["env"].get("JAVA_CODEBASE_RAG_LANGUAGE") == "ru"
+
+
+# ----- Task 10: help-text migration -------------------------------------------
+
+
+def test_help_russian_representative_commands(capsys):
+    for cmd in ("find", "callers", "status"):
+        rc = jrag.main([cmd, "--lang", "ru", "--help"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert any("Ѐ" <= ch <= "ӿ" for ch in out), cmd
+        assert "Filter by microservice" not in out
+        assert "Output format (default: text)" not in out
+        assert "Index directory override" not in out
+
+
+def test_help_english_pinned_lines(capsys):
+    rc = jrag.main(["find", "--help"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Filter by microservice." in out
+    assert "Output format (default: text)." in out
+    assert "Cap on results (default 20)." in out
+
+    rc = cli.main(["init", "--help"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Java repository root (default: cwd)" in out
+
+
+def test_operator_help_russian(capsys):
+    rc = cli.main(["install", "--lang", "ru", "--help"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert any("Ѐ" <= ch <= "ӿ" for ch in out)
+    assert "Java repository root" not in out
+
+
+def test_no_raw_english_help_literals_left():
+    """Static guard: every help=/description= literal in the two CLI modules
+    is a tr() call (empty-string metavar-style literals excepted)."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent / "src" / "java_codebase_rag"
+    pattern = re.compile(r'(?:help|description)=("|\')([^"\']*[a-z]{3}[^"\']*)\1')
+    offenders: list[str] = []
+    for name in ("jrag.py", "cli.py"):
+        for lineno, line in enumerate(
+            (root / name).read_text().splitlines(), start=1
+        ):
+            m = pattern.search(line)
+            if m:
+                offenders.append(f"{name}:{lineno}: {m.group(2)[:50]}")
+    assert not offenders, f"raw English help literals remain: {offenders}"
+
+
+def test_unified_help_russian_via_dispatch_subprocess(tmp_path):
+    """End-to-end through the real binary + dispatcher: before-verb ``--lang``
+    (both token and ``=`` forms) renders the unified help in Russian."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.argv=['jrag','--lang','ru','--help']; "
+         "from java_codebase_rag import cli_dispatch; cli_dispatch._console_script_main()"],
+        capture_output=True, text=True, cwd=str(tmp_path),
+    )
+    assert "Команды оператора" in out.stdout
+
+    out2 = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.argv=['jrag','--lang=ru','status','--help']; "
+         "from java_codebase_rag import cli_dispatch; cli_dispatch._console_script_main()"],
+        capture_output=True, text=True, cwd=str(tmp_path),
+    )
+    assert "Здоровье и свежесть индекса" in out2.stdout

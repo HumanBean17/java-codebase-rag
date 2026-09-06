@@ -289,3 +289,74 @@ def test_mcp_process_stays_english_with_env_set(monkeypatch):
     out = resolve_v2("   ")
 
     assert out.message == "Invalid identifier: whitespace only"
+
+
+# ----- Task 9: subprocess boundaries (spec D5) --------------------------------
+
+
+def test_mcp_subprocess_env_scrubs_language(tmp_path, monkeypatch):
+    """MCP child spawns scrub the language var — a user-exported value must
+    not localize MCP-triggered progress output."""
+    from java_codebase_rag.mcp import server
+
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_LANGUAGE", "ru")
+
+    env = server._cocoindex_subprocess_env(tmp_path)
+
+    assert "JAVA_CODEBASE_RAG_LANGUAGE" not in env
+    assert env.get("JAVA_CODEBASE_RAG_SOURCE_ROOT") == str(tmp_path)
+
+
+def test_watcher_passes_language_to_child(tmp_path, monkeypatch):
+    """The watcher's reprocess children receive the resolved language via the
+    opt-in subprocess_env(language=True) seam (not config-wide republication)."""
+    from java_codebase_rag import config
+
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_INDEX_DIR", raising=False)
+    (tmp_path / ".java-codebase-rag.yml").write_text("language: ru\n")
+    monkeypatch.chdir(tmp_path)
+    cfg = config.resolve_operator_config(source_root=None)
+    assert cfg.language == "ru"
+
+    env = cfg.subprocess_env(language=True)
+
+    assert env["JAVA_CODEBASE_RAG_LANGUAGE"] == "ru"
+
+
+def test_detach_spawn_env_carries_language(tmp_path, monkeypatch):
+    """`jrag watch --detach` passes the CLI-resolved language to the daemon
+    child explicitly (flag-tier values are not inherited any other way)."""
+    import argparse as _ap
+    import subprocess as _sp
+
+    from java_codebase_rag import config
+    from java_codebase_rag import jrag as jrag_mod
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_INDEX_DIR", raising=False)
+    monkeypatch.setattr(
+        "java_codebase_rag.watch.client.is_daemon_alive", lambda _idx: False
+    )
+    (tmp_path / ".java-codebase-rag.yml").write_text("language: ru\n")
+    monkeypatch.chdir(tmp_path)
+    cfg = config.resolve_operator_config(source_root=None)
+
+    captured: dict = {}
+
+    class _FakeProc:
+        def poll(self):
+            return 0  # child "exited" immediately -> detach fails fast, rc 2
+
+    def fake_popen(argv, **kwargs):
+        captured.update(kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(_sp, "Popen", fake_popen)
+
+    args = _ap.Namespace(index_dir=None, debounce_ms=None, backend=None)
+    rc = jrag_mod._cmd_watch_detach(args, cfg)
+
+    assert rc == 2
+    assert captured["env"].get("JAVA_CODEBASE_RAG_LANGUAGE") == "ru"

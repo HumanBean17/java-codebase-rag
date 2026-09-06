@@ -1595,6 +1595,10 @@ def _cmd_watch_detach(args: argparse.Namespace, cfg) -> int:
             stderr=log_fh,
             start_new_session=True,  # setsid: detach from the controlling terminal
             close_fds=True,
+            # The daemon is operator-facing: pass the resolved language
+            # explicitly (flag-tier values are not inherited any other way —
+            # config republication deliberately omits language, spec D2/D5).
+            env=dict(os.environ, JAVA_CODEBASE_RAG_LANGUAGE=cfg.language),
         )
     finally:
         if log_fh is not None:

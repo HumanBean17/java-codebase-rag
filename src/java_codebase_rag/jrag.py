@@ -381,6 +381,28 @@ def _lower_snake(value: str) -> str:
     return value.strip().lower().replace("-", "_").replace(" ", "_")
 
 
+def _add_lang_flag(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Register the interface-language flag (spec D3).
+
+    Added to the top-level parser, ``_common_parser`` (33 agent verbs) and
+    ``_core_parser`` (aggregate verbs) so the after-verb form parses and
+    shows in help; the before-verb form is handled by the dispatch pre-scan
+    (``cli_dispatch``), which strips and stashes it before routing.
+    ``dest="lang"`` is uniform across all three sites.
+    """
+    from java_codebase_rag.i18n import tr
+
+    p.add_argument(
+        "--lang",
+        "-L",
+        choices=("en", "ru"),
+        dest="lang",
+        default=None,
+        help=tr("HELP_FLAG_LANG"),
+    )
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Argparse builder. Imports no backend modules.
 
@@ -418,6 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=version_string(parser.prog),
     )
+    _add_lang_flag(parser)
     subparsers = parser.add_subparsers(dest="command", parser_class=_EnvelopeArgumentParser)
 
     # Common flags applied per command via parents=[_common_parser()]. NOT
@@ -431,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     # the override to the command that asked for it.
     def _common_parser() -> argparse.ArgumentParser:
         common = argparse.ArgumentParser(add_help=False)
+        _add_lang_flag(common)
         common.add_argument("--service", type=str, default=None, help="Filter by microservice.")
         common.add_argument("--module", type=str, default=None, help="Filter by module.")
         common.add_argument(
@@ -515,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --index-dir / --format / --detail.
     def _core_parser() -> argparse.ArgumentParser:
         core = argparse.ArgumentParser(add_help=False)
+        _add_lang_flag(core)
         core.add_argument(
             "--index-dir",
             type=str,
@@ -1357,6 +1382,7 @@ def _resolve_cfg(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     search``).
     """
     from java_codebase_rag.config import resolve_operator_config
+    from java_codebase_rag.i18n import cli_lang_override, set_locale
 
     cfg = resolve_operator_config(
         source_root=None,
@@ -1366,8 +1392,14 @@ def _resolve_cfg(args: argparse.Namespace):  # type: ignore[no-untyped-def]
         # treats ``None`` as "not provided" so non-watch commands are unaffected).
         cli_watch_debounce_ms=getattr(args, "debounce_ms", None),
         cli_watch_backend=getattr(args, "backend", None),
+        # Interface language: the after-verb flag, else the dispatch pre-scan
+        # stash (before-verb flag, stripped from argv before parse).
+        cli_language=getattr(args, "lang", None) or cli_lang_override(),
     )
     cfg.apply_to_os_environ()
+    # Authoritative locale post-resolution (flag > env > YAML > default).
+    # apply_to_os_environ deliberately does NOT publish language (spec D2).
+    set_locale(cfg.language)
     return cfg
 
 
@@ -4584,8 +4616,15 @@ def main(argv: list[str] | None = None) -> int:
     """
     raise_fd_limit()
     _suppress_runtime_stderr_noise()
-    parser = build_parser()
+    from java_codebase_rag.i18n import cli_lang_override, init_help_locale, scan_lang
+
     raw = list(argv if argv is not None else sys.argv[1:])
+    # Locale must be known before build_parser(): argparse help strings are
+    # baked at construction. scan_lang catches the after-verb flag form; the
+    # stash carries the dispatch pre-scan's before-verb value (console path,
+    # where the flag tokens were already stripped from argv).
+    init_help_locale(scan_lang(raw) or cli_lang_override())
+    parser = build_parser()
     try:
         args = parser.parse_args(raw)
     except SystemExit as exc:

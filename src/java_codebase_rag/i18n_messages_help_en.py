@@ -7,4 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
-MESSAGES: dict[str, Any] = {}
+MESSAGES: dict[str, Any] = {
+    "HELP_FLAG_LANG": (
+        "Interface language for output, help, and errors (default: en; also "
+        "JAVA_CODEBASE_RAG_LANGUAGE or YAML language:)."
+    ),
+}

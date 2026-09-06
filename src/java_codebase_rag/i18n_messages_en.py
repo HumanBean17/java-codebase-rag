@@ -13,4 +13,9 @@ MESSAGES: dict[str, Any] = {
     "MSG_TEST_GREETING": "index ready",
     "MSG_TEST_PLURAL": {"one": "{n} match", "other": "{n} matches"},
     "LBL_TEST_PREFIX": "Verdict: ",
+    # Unified dispatcher help section header (byte-exact pre-i18n string).
+    "MSG_UNIFIED_OPERATOR_HEADER": (
+        "Operator commands (indexing & maintenance; run `jrag <command> --help` "
+        "for details):\n"
+    ),
 }

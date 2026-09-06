@@ -296,13 +296,21 @@ def _parse_source_root(ns: argparse.Namespace) -> Path | None:
 
 
 def _resolved_from_ns(ns: argparse.Namespace) -> ResolvedOperatorConfig:
+    from java_codebase_rag.i18n import cli_lang_override, set_locale
+
     root = _parse_source_root(ns)
-    return resolve_operator_config(
+    cfg = resolve_operator_config(
         source_root=root,
         cli_index_dir=ns.index_dir,
         cli_embedding_model=getattr(ns, "embedding_model", None),
         cli_embedding_device=getattr(ns, "embedding_device", None),
+        # Interface language: the after-verb flag, else the dispatch pre-scan
+        # stash (before-verb flag, stripped from argv before parse).
+        cli_language=getattr(ns, "lang", None) or cli_lang_override(),
     )
+    # Authoritative locale post-resolution (flag > env > YAML > default).
+    set_locale(cfg.language)
+    return cfg
 
 
 def _startup_hints(cfg: ResolvedOperatorConfig) -> None:
@@ -330,6 +338,24 @@ def _add_verbosity_flags(p: argparse.ArgumentParser) -> None:
         action="store_true",
         dest="verbose",
         help="Show full subprocess output (Lance warnings, brownfield events, progress bars).",
+    )
+
+
+def _add_lang_flag(p: argparse.ArgumentParser) -> None:
+    """Register the interface-language flag on an operator subparser (spec D3).
+
+    The before-verb form is handled by the dispatch pre-scan
+    (``cli_dispatch``), which strips and stashes it before routing.
+    """
+    from java_codebase_rag.i18n import tr
+
+    p.add_argument(
+        "--lang",
+        "-L",
+        choices=("en", "ru"),
+        dest="lang",
+        default=None,
+        help=tr("HELP_FLAG_LANG"),
     )
 
 
@@ -1234,6 +1260,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uc_stats.set_defaults(handler=_cmd_unresolved_calls_stats)
 
+    # ``--lang`` on every registered subparser (and sub-subparser), so the
+    # after-verb form parses on all verbs uniformly. The walk mirrors
+    # ``cli_dispatch._operator_subcommand_helps``'s _SubParsersAction pattern;
+    # direct per-parser calls would need touching every add_parser site above.
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for choice_parser in action.choices.values():
+                if not any(
+                    act.dest == "lang" for act in choice_parser._actions
+                ):
+                    _add_lang_flag(choice_parser)
+
     return parser
 
 
@@ -1243,6 +1281,12 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "refresh":
         print(_REFRESH_DEPRECATION, file=sys.stderr)
         raw[0] = "reprocess"
+    from java_codebase_rag.i18n import cli_lang_override, init_help_locale, scan_lang
+
+    # Locale must be known before build_parser(): argparse help strings are
+    # baked at construction. scan_lang catches the after-verb flag form; the
+    # stash carries the dispatch pre-scan's before-verb value (console path).
+    init_help_locale(scan_lang(raw) or cli_lang_override())
     parser = build_parser()
     try:
         args = parser.parse_args(raw)

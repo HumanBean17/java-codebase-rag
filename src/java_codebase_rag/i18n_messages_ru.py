@@ -18,4 +18,9 @@ MESSAGES: dict[str, Any] = {
         "many": "{n} совпадений",
     },
     "LBL_TEST_PREFIX": "Вердикт: ",
+    # Unified dispatcher help section header.
+    "MSG_UNIFIED_OPERATOR_HEADER": (
+        "Команды оператора (индексация и обслуживание; подробности — "
+        "`jrag <command> --help`):\n"
+    ),
 }

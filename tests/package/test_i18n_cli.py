@@ -272,3 +272,20 @@ def test_advisory_functions_russian():
         assert "bm25" in pipeline.retrieval_bm25_hint()
     finally:
         i18n.reset_locale()
+
+
+# ----- Task 8: MCP-process isolation (spec D4/D7) ----------------------------
+
+
+def test_mcp_process_stays_english_with_env_set(monkeypatch):
+    """Env alone never localizes shared producers — only set_locale does.
+    This is the MCP-process simulation: the env var is set (an operator
+    exporting it globally), but no CLI entrypoint ran to set the locale."""
+    from java_codebase_rag.analysis.resolve_service import resolve_v2
+
+    monkeypatch.setenv("JAVA_CODEBASE_RAG_LANGUAGE", "ru")
+    assert i18n.get_locale() == "en"
+
+    out = resolve_v2("   ")
+
+    assert out.message == "Invalid identifier: whitespace only"

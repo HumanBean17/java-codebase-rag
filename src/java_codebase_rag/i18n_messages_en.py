@@ -247,4 +247,66 @@ MESSAGES: dict[str, Any] = {
     "INST_WOULD_RUN_INCREMENTAL": "\nWould run incremental index update (Lance + graph).",
     "INST_ERR_NOT_A_DIR": "Error: Path {path} does not exist or is not a directory.",
     "INST_WARN_MODEL_FALLBACK": "Warning: Model path {model} not found, falling back to 'auto'.",
+    # Shared producers: resolve + absence diagnosis (Task 8, spec D7).
+    # EN values are byte-exact; MCP consumes these modules with locale=en.
+    "ERR_INVALID_IDENTIFIER": "Invalid identifier: {detail}",
+    "RS_DETAIL_EMPTY": "empty string",
+    "RS_DETAIL_WS": "whitespace only",
+    "RS_NO_MATCHES": "No matches for identifier; use search(query=...) for ranked fuzzy lookup.",
+    "RS_WILDCARDS": (
+        "Wildcards (* and ?) are not supported in resolve; "
+        "use search(query=...) for ranked text search."
+    ),
+    "ABS_EXTERNAL": (
+        "`{fqn}` is referenced by this project but not defined in it "
+        "({reason}). It is an external dependency."
+    ),
+    "ABS_NO_NODE_ID": (
+        "No node with id `{query}`. Run `resolve` to map a name/FQN to an id, "
+        "or `search` to discover symbols."
+    ),
+    "ABS_EMPTY_INDEX": (
+        "Index appears empty/unindexed — verify the project was indexed "
+        "before concluding a symbol is absent."
+    ),
+    "ABS_NL_MISS": (
+        "No symbol matches `{query}`. Refine the query — try an identifier "
+        "(class/method/FQN) or browse the project vocabulary below."
+    ),
+    "ABS_FILTER_MISS_CLOSE": (
+        "No results for `{identifier}` under the current filter. "
+        "Close matches exist — try relaxing a dimension (see filter_relaxation)."
+    ),
+    "ABS_FILTER_MISS": (
+        "No results under the current filter. Matches exist under other values "
+        "(see filter_relaxation)."
+    ),
+    "ABS_NEIGHBORS_MEANINGFUL": (
+        "`{node}` has no neighbors of the requested type here — this is a "
+        "genuine leaf / external entrypoint, not an error."
+    ),
+    "ABS_NEIGHBORS_MISS": (
+        "No neighbors for `{node}` with the requested edge type/direction. "
+        "Run `describe` and inspect `edge_summary` for the edge types this "
+        "node actually participates in."
+    ),
+    "ABS_NOT_IN_PROJECT": (
+        "No symbol matching `{query}` was found in the project vocabulary. "
+        "It does not appear to be defined here."
+    ),
+    "ABS_CLOSEST": (
+        "No exact match for `{query}`. Closest symbols: {names}. "
+        "Refine the query (typo? scope?) and retry."
+    ),
+    "ABS_NO_MATCH_PLAIN": "No match for `{query}`. Refine the query and retry.",
+    "ABS_CAPABILITY_HEAD": "This index contains 0 {subject_noun} —",
+    "ABS_CAPABILITY_MID": (
+        " any query on {subject} returns empty regardless of arguments — "
+        "don't retry it."
+    ),
+    "ABS_CAPABILITY_TAIL_REDIRECT": (
+        " For what you need, use the edge types this index does have (e.g. {named})."
+    ),
+    "ABS_CAPABILITY_TAIL_FIND": " For symbol discovery use `find`/`search` instead.",
+    "ABS_UNABLE": "Unable to diagnose the empty result; refine the query and retry.",
 }

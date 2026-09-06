@@ -240,7 +240,9 @@ def init_help_locale(scan_value: str | None) -> str:
     global _locale
     candidate = scan_value if scan_value in VALID_LANGS else None
     if candidate is None:
-        env_raw = os.environ.get("JAVA_CODEBASE_RAG_LANGUAGE", "").strip()
+        from java_codebase_rag.config import ENV_LANGUAGE
+
+        env_raw = os.environ.get(ENV_LANGUAGE, "").strip()
         if env_raw in VALID_LANGS:
             candidate = env_raw
     if candidate is None:

@@ -159,15 +159,15 @@ def test_indexed_suffixes_derived_from_registry():
     "rel,expected",
     [
         ("src/main/java/app/Foo.java", {"java"}),
-        ("src/main/resources/db/migration/V1__init.sql", {"sql"}),
-        ("src/main/resources/application.yml", {"yaml"}),
-        ("src/main/resources/application-prod.yaml", {"yaml"}),
+        # SQL/YAML are unindexed by design (sources-only) — no reindex kind,
+        # even at the exact paths the old extraction used to pick up.
+        ("src/main/resources/db/migration/V1__init.sql", set()),
+        ("src/main/resources/application.yml", set()),
+        ("src/main/resources/application-prod.yaml", set()),
         # non-indexed suffixes
         ("README.md", set()),
         ("src/main/resources/db/migration/V1.txt", set()),
-        # sql NOT under db/migration is ignored by cocoindex → not indexed
         ("src/main/resources/V1.sql", set()),
-        # yaml not matching application* under src/main/resources
         ("src/main/resources/logback.yml", set()),
         ("src/main/resources/application.yaml.bak", set()),
     ],
@@ -267,42 +267,35 @@ def test_reindex_graph_failure_still_commits_and_does_not_crash(tmp_path, monkey
     assert calls.count("commit_graph_snapshot") == 1
 
 
-# -- reindex: sql / yaml → vectors only ---------------------------------------
+# -- reindex: sql / yaml events are non-events ----------------------------------
 
 
-def test_reindex_sql_is_vectors_only_no_snapshot(tmp_path, monkeypatch):
-    """A sql change runs vectors only; the graph (and its COW snapshot) is untouched
-    because the graph does not index SQL."""
+def test_reindex_sql_yaml_events_are_nonevents(tmp_path, monkeypatch):
+    """A .sql / application*.yml file event classifies to no kind, so nothing is
+    scheduled and no reindex subprocess can ever fire (sources-only indexing)."""
     calls: list[str] = []
     w = _make_watcher(tmp_path, calls, monkeypatch)
-    w.reindex({"sql"})
-    assert calls == [
-        "on_event:indexing_started",
-        "on_event:vectors",
-        "run_cocoindex_update",
-        "on_event:indexing_done",
-    ]
-    assert "run_incremental_graph" not in calls
-    assert "begin_graph_snapshot" not in calls
-    assert "commit_graph_snapshot" not in calls
+    for rel in (
+        "src/main/resources/db/migration/V2__add_table.sql",
+        "src/main/resources/application.yml",
+        "src/main/resources/application-prod.yaml",
+    ):
+        kinds = w._classify(tmp_path / rel)
+        assert kinds == set(), f"{rel} must classify to no kind, got {kinds}"
+        w._schedule(kinds)
+    assert w._pending == set()
+    assert calls == []
 
 
-def test_reindex_yaml_is_vectors_only_no_snapshot(tmp_path, monkeypatch):
-    """A yaml change runs vectors only — same rationale as sql."""
+def test_reindex_java_and_kotlin_runs_graph_once(tmp_path, monkeypatch):
+    """A mixed source burst (java+kotlin) runs vectors once and graph once."""
+    from java_codebase_rag.ast.language import LANG_BACKENDS
+
+    if "kotlin" not in LANG_BACKENDS:
+        pytest.skip("tree_sitter_kotlin not importable on this install")
     calls: list[str] = []
     w = _make_watcher(tmp_path, calls, monkeypatch)
-    w.reindex({"yaml"})
-    assert "run_cocoindex_update" in calls
-    assert "run_incremental_graph" not in calls
-    assert "begin_graph_snapshot" not in calls
-    assert "on_event:indexing_done" in calls
-
-
-def test_reindex_java_and_sql_runs_graph_once(tmp_path, monkeypatch):
-    """A mixed burst (java+sql) runs vectors once and graph once (java present)."""
-    calls: list[str] = []
-    w = _make_watcher(tmp_path, calls, monkeypatch)
-    w.reindex({"java", "sql"})
+    w.reindex({"java", "kotlin"})
     assert calls.count("run_cocoindex_update") == 1
     assert calls.count("run_incremental_graph") == 1
     assert "begin_graph_snapshot" in calls
@@ -364,8 +357,9 @@ def test_reindex_graph_only_skips_vectors_and_completes(tmp_path, monkeypatch):
 
 
 def test_reindex_graph_only_sql_is_clean_noop(tmp_path, monkeypatch):
-    """A sql change in graph-only mode is a clean no-op: vectors are skipped and
-    the graph does not index SQL, so neither pipeline fn runs but ``indexing_done``
+    """A non-graph kind (sql events no longer classify; kept as a legacy/unknown
+    kind guard) in graph-only mode is a clean no-op: vectors are skipped and the
+    graph does not index it, so neither pipeline fn runs but ``indexing_done``
     still fires (no perpetual vectors error as on the pre-fix path)."""
     calls: list[str] = []
     w = _make_watcher(tmp_path, calls, monkeypatch)

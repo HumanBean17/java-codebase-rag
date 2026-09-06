@@ -44,7 +44,10 @@ Most files in `docs/` are **operator-facing**. The two flagged below are **inter
 
 `skills/` and `agents/` are shipped consumer artifacts — deployed verbatim by
 `install`/`update` to the user's agent host. This repo is the source of truth;
-never hand-patch deployed copies.
+never hand-patch deployed copies. `jrag prime` (`src/java_codebase_rag/prime.py`)
+is an optional orientation command, deliberately NOT wired into `install` —
+manual SessionStart wiring only (`docs/JRAG-CLI.md`); don't add hook install
+support without an explicit decision.
 
 ## Publishing (PyPI)
 

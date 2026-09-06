@@ -37,6 +37,7 @@ Core library = **top-level `.py` modules** (`py-modules`); the installable **`ja
 | Watch daemon | `java_codebase_rag/watch/` (`lock`, `paths`, `protocol`, `warm`, `server`, `client`, `watcher`, `daemon`) |
 | Surfaces | `java_codebase_rag/{cli,jrag,installer}.py` |
 | Shipped artifacts | `skills/`, `agents/` (deployed verbatim to agent host via `install`/`update`) |
+| Prime payload | `java_codebase_rag/prime.py` — stdlib-only `PRIME_TEMPLATE` + `--hook-json` envelope; state slots computed in `jrag.py::_prime_state`/`_cmd_prime`. Optional surface: not wired into `install` (manual SessionStart wiring, documented in `docs/JRAG-CLI.md`) |
 
 **Entrypoints** (`pyproject.toml [project.scripts]`): `jrag` and `java-codebase-rag` (legacy alias) both → `java_codebase_rag.cli_dispatch:_console_script_main` — the unified dispatcher that routes operator verbs to `cli._console_script_main` and agent verbs to `jrag._console_script_main`; `jrag-mcp` and `java-codebase-rag-mcp` (legacy alias) both → `java_codebase_rag.mcp.server:main`.
 
@@ -123,6 +124,7 @@ Precedence **CLI flag > env > YAML (`.java-codebase-rag.yml`) > default**; each 
 - **New node kind** → Ladybug schema (`_create_schema`) + extraction pass + `NodeFilter` / resolve generators in `mcp_v2.py` / `resolve_service.py`.
 - **Semantic extraction change** → bump `ONTOLOGY_VERSION` (`ast_java.py:87`); read guard + incremental fallback follow automatically; note reindex in [`docs/CONFIGURATION.md`](./CONFIGURATION.md).
 - **Watch surface** → `java_codebase_rag/watch/` (warm reads + debounced reindex). New read command? add a payload core in `read_payloads.py`, then wire `server.py` dispatch + the `jrag` handler (cold path stays the default). The cold path must stay byte-identical — the daemon is an accelerator, never a dependency.
+- **Prime payload** → `PRIME_TEMPLATE` in `java_codebase_rag/prime.py` (static parts) + state slots in `jrag.py::_prime_state`. The embedded `Commands by group` / `Command reference` blocks mirror `jrag --help` — regenerate them in lockstep when a command changes, and keep operator verbs out. The module must stay stdlib-importable (SessionStart latency budget; a test guards the import set).
 
 Dev workflow (editable install, test-reset ritual, full-suite discipline) — see [`CLAUDE.md`](../CLAUDE.md).
 

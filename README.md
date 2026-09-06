@@ -92,6 +92,7 @@ jrag overview chat-core        # bundle for a microservice
 jrag overview /chat/assign     # route flow (inbound callers + outbound CALLS)
 jrag overview banking.chat     # topic producers + consumers
 jrag overview chat-core --as microservice  # override auto-detection
+jrag prime                     # optional agent orientation payload (see docs/JRAG-CLI.md)
 
 # Locate
 jrag find ChatService          # exact name/FQN lookup (symbols)
@@ -148,7 +149,7 @@ Full schemas, `NodeFilter` / `EdgeFilter` semantics, and the hints contract live
 
 ### Three-layer architecture
 
-Layer 1 (storage) → Layer 2 (the `jrag` CLI, **or** the legacy 5-tool MCP) → Layer 3 (skill). The CLI-surface skill **[`/explore-codebase-cli`](./skills/explore-codebase-cli/SKILL.md)** documents the `jrag` CLI; the MCP-surface skill **[`/explore-codebase`](./skills/explore-codebase/SKILL.md)** documents the legacy 5-tool MCP (PR-JRAG-5). See the [architecture diagram in `skills/README.md`](./skills/README.md#three-layer-architecture).
+Layer 1 (storage) → Layer 2 (the `jrag` CLI, **or** the legacy 5-tool MCP) → Layer 3 (skill). The CLI-surface skill **[`/explore-codebase-cli`](./skills/explore-codebase-cli/SKILL.md)** documents the `jrag` CLI; the MCP-surface skill **[`/explore-codebase`](./skills/explore-codebase/SKILL.md)** documents the legacy 5-tool MCP (PR-JRAG-5). See the [architecture diagram in `skills/README.md`](./skills/README.md#three-layer-architecture). Optionally, a SessionStart hook running **[`jrag prime --hook-json`](./docs/JRAG-CLI.md#jrag-prime-optional-sessionstart-priming)** (manual wiring) can inject orientation at session start instead of relying on the skill alone.
 
 ---
 

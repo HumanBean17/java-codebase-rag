@@ -43,6 +43,7 @@ One repo, two stores, two audiences:
 | --- | --- | --- |
 | MCP server (`server.py`) | agents | `search` / `find` / `describe` / `neighbors` / `resolve` |
 | `jrag` CLI | agents / humans | same five tools, terminal rendering |
+| `jrag prime` (optional, manual SessionStart wiring) | agents | one-shot orientation at session start: identity ("a map, not an oracle"), the trust rule, live index state, and the command surface embedded verbatim from `jrag --help`; silent (empty output, rc 0) when the repo has no index. Not wired into `install` — the skill/agent artifacts remain the shipped teaching surface; prime is an opt-in addition |
 | `jrag watch` daemon | agents / humans | index freshness + warm-query accelerator over a Unix socket (one per project); pure accelerator, cold path stays byte-identical when no daemon runs |
 | `jrag` CLI | operators | index lifecycle, `meta` / `tables` / `diagnose-ignore`, `analyze-pr` |
 

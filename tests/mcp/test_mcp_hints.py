@@ -420,11 +420,19 @@ def _service_with_injects_out(ladybug_graph) -> str:
     rows = ladybug_graph._rows(  # noqa: SLF001
         "MATCH (cls:Symbol)-[:INJECTS]->(dep:Symbol) "
         "WHERE cls.kind = 'class' AND cls.role = 'SERVICE' "
-        "RETURN cls.id AS id LIMIT 1",
+        "RETURN cls.id AS id ORDER BY id LIMIT 50",
     )
     if not rows:
         pytest.skip("no SERVICE class with INJECTS.out > 0 in fixture")
-    return str(rows[0]["id"])
+    # Same selection discipline as _type_with_injects_in: walk ordered
+    # candidates and keep the first whose INJECTS.out hint is not suppressed
+    # by type rollup — the same edge_summary guard the describe path applies.
+    for row in rows:
+        tid = str(row["id"])
+        out = describe_v2(tid, graph=ladybug_graph)
+        if out.record and not _type_rollup_would_emit(out.record.edge_summary):
+            return tid
+    pytest.skip("no rollup-free SERVICE class with INJECTS.out in fixture")
 
 
 def _type_with_injects_in(ladybug_graph) -> str:

@@ -416,7 +416,7 @@ Prefer **`jrag reprocess --graph-only`** when you only need LadybugDB rebuilt fr
 
 Output defaults to compact text; `--format json` emits the shared envelope verbatim. Shared flags apply to most commands: `--service`, `--module`, `--limit`, `--format`, `--detail {brief,normal,full}`, `--index-dir`. `<query>` commands also take resolve hints (`--kind`, `--role`, `--fqn-contains`). Run `jrag <command> --help` for the per-command synopsis; for the full envelope contract and flag table, see [`jrag` — agent CLI](../README.md#jrag--agent-cli) in the README.
 
-A missing or stale index produces an actionable `status: error` envelope (exit **2**) rather than a traceback.
+A missing or stale index produces an actionable `status: error` envelope (exit **2**) rather than a traceback — the one exception is `prime`, which stays silent and exits 0 (see below).
 
 ### Command reference
 
@@ -436,6 +436,7 @@ jrag overview chat-core        # bundle for a microservice
 jrag overview /chat/assign     # route flow (inbound callers + outbound CALLS)
 jrag overview banking.chat     # topic: producers + consumers
 jrag overview chat-core --as microservice  # override auto-detection
+jrag prime                     # session-start orientation payload (see below)
 ```
 
 `overview` dispatches on its subject: a `/`-prefixed string is a route (same as `flow`), a known microservice name yields its routes + clients + producers, otherwise it is treated as a topic. `--as {microservice,route,topic}` overrides the auto-detection.
@@ -503,6 +504,73 @@ See [`jrag search`](#jrag-search) below for the full flag reference (hybrid, exp
 
 ```bash
 jrag vocab-index            # rebuild the vocabulary sidecar (did-you-mean / absence diagnosis)
+```
+
+### `jrag prime` (optional SessionStart priming)
+
+`prime` prints an orientation payload for agents: a navigation-framed summary of what `jrag` is, one trust rule, the live index state, and the agent command surface embedded verbatim from `jrag --help`. It is **optional and not wired into `install`** — the skill/agent artifacts remain the shipped teaching surface. Hosts that support SessionStart hooks can inject the payload at every session start by wiring it manually.
+
+```bash
+jrag prime                    # bare markdown (human inspection)
+jrag prime --hook-json        # SessionStart hook envelope (what a hook emits)
+```
+
+**Payload template** — four parts; `{…}` slots are computed per repo (canonical text: `PRIME_TEMPLATE` in `java_codebase_rag/prime.py`):
+
+```markdown
+`jrag` is a CLI over a prebuilt structural index of this Java/Kotlin repo — a map, not an oracle.
+It resolves names to files, walks who-calls-whom and dependency edges, and surfaces entry points
+and service boundaries — structure you'd otherwise grep for. You are the explorer; jrag is the map.
+
+**Trust rule:** if jrag and the files disagree, trust the files — the index may lag the working tree.
+
+**Index state**
+
+- Index {freshness} (incremented {age} ago) · watch daemon {running|not running}
+- {n} services ({top names, truncated}) · {n} symbols
+- {n} routes · {n} clients · {n} producers
+
+**Commands by group** (from `jrag --help`)   … agent commands grouped health / locate /
+                                                listings / traversal / orientation / search
+**Command reference**                          … one line per agent command, verbatim from
+                                                `jrag --help`
+
+Run `jrag <command> --help` for flags.
+```
+
+A stale index spells out the change count (`stale — 56 files changed since last increment`); service names list the seven largest services then truncate. **Operator commands are excluded**: the embedded surface lists agent verbs only — the operator lifecycle (`init`, `install`, `update`, `reprocess`, `erase`, `meta`, `tables`, `diagnose-ignore`) never appears in the payload.
+
+**Three states, one exit code.** `prime` is hook-safe by construction — every soft state degrades to empty output, and the exit code is **0 in all of them**:
+
+| State | stdout | stderr | exit |
+| ----- | ------ | ------ | ---- |
+| Index present (fresh or stale) | full payload | — | `0` |
+| No project YAML / no index discovered | nothing | nothing | `0` |
+| Internal error (unreadable index meta, corrupt YAML) | nothing | one line: `jrag prime: <ErrorType>: <message>` | `0` |
+
+Silence when unindexed is what makes a user-scope hook tolerable — prime fires in every session of every repo and must never nag repos it does not index.
+
+**`--hook-json`** wraps the same markdown in the Claude Code SessionStart envelope (payload in `additionalContext`; qwen-code consumes the same shape):
+
+```json
+{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "<markdown payload>"}}
+```
+
+**Latency.** SessionStart fires on start, resume, and after compaction, so prime reads metadata only — project-root discovery, graph meta, index mtimes, and the watch daemon state file. It never imports the vector stack (torch / sentence_transformers / lancedb); a test guards the import set.
+
+**Manual wiring.** To try prime in Claude Code, add this to `.claude/settings.json` (project scope) or `~/.claude/settings.json` (user scope — it stays silent in repos without an index). The same shape works for qwen-code (`.qwen/settings.json`) and any SessionStart-hook host; `jrag` must be on the host's PATH:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "jrag prime --hook-json"}]
+      }
+    ]
+  }
+}
 ```
 
 ### `jrag search`

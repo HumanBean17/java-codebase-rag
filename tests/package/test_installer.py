@@ -4,6 +4,16 @@ import json
 import pytest
 from pathlib import Path
 from java_codebase_rag.installer import HOSTS
+from java_codebase_rag.pipeline import vector_stack_installed
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sibling test's apply_to_os_environ() can leak JAVA_CODEBASE_RAG_RETRIEVAL
+    into os.environ unscoped (graph-only installs force retrieval=bm25 there);
+    the env tier outranks YAML, so the leak flips later tests into the bm25
+    branch and skips the stubbed cocoindex step."""
+    monkeypatch.delenv("JAVA_CODEBASE_RAG_RETRIEVAL", raising=False)
 
 
 class TestHostConfigPaths:
@@ -1911,6 +1921,10 @@ class TestPR4IndexProgress:
         assert "Warning:" in err_text
         assert "incremental graph update failed" in err_text
 
+    @pytest.mark.skipif(
+        not vector_stack_installed(),
+        reason="graph-only platforms force retrieval=bm25 at install; the vectors-failure path is unreachable there (covered on vector-capable legs)",
+    )
     def test_install_indexing_exception_renders_failed_footer(self, tmp_path, monkeypatch, capfd):
         """If run_cocoindex_update raises during install's indexing sub-step,
         the renderer bracket must render a failed (red cross) footer before the
@@ -1944,6 +1958,10 @@ class TestPR4IndexProgress:
         assert cli_format.styled_cross() in err_text
         assert cli_format.styled_check() not in err_text
 
+    @pytest.mark.skipif(
+        not vector_stack_installed(),
+        reason="graph-only platforms force retrieval=bm25 at install; the vectors-failure path is unreachable there (covered on vector-capable legs)",
+    )
     def test_install_indexing_failure_returns_nonzero(self, tmp_path, monkeypatch, capfd):
         """A non-exception indexing failure (cocoindex exits non-zero) must NOT
         report install success. Regression for issue #351: run_install discarded

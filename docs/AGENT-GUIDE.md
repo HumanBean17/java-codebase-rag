@@ -14,7 +14,7 @@ On the `cli` surface no paste-in is needed: `jrag install --surface cli` wires a
 
 **Node kinds:** `Symbol` (types and methods), `Route` (HTTP and messaging entry points), `Client` (outbound HTTP call sites), `Producer` (outbound async call sites).
 
-**Indexed content:** Java production sources plus SQL and YAML (use `search` `table`: `java`, `sql`, `yaml`, or `all`).
+**Indexed content:** JVM production sources (`.java`/`.kt`) only. SQL migrations, YAML/properties config, and XML are **not** indexed — grep and read those files directly (the index never wins against the file).
 
 **Ontology: 19** — if results look structurally wrong or empty across tools, the index may be missing, stale, or built with a different `ontology_version`; you cannot re-index via MCP — ask the operator to rebuild.
 
@@ -207,9 +207,9 @@ Prefer **`resolve` → `describe(id=…)`** over **`describe(fqn=…)`** when an
 
 #### `search`
 
-Ranked chunk retrieval. Args: `query`, `table` (`java`|`sql`|`yaml`|`all`, default `java`), `hybrid` (bool), `limit` (default 5), `offset`, `path_contains`, optional `filter` (symbol-applicable `NodeFilter` only), optional `chunks` (bool, default `false`). Returns one row per `primary_type_fqn` (symbol/type) by default; set `chunks=true` to restore chunk-level output. When deduped, each hit includes a `chunks` field (≥1) indicating how many chunks were collapsed into that hit.
+Ranked chunk retrieval. Args: `query`, `hybrid` (bool), `limit` (default 5), `offset`, `path_contains`, optional `filter` (symbol-applicable `NodeFilter` only), optional `chunks` (bool, default `false`). Returns one row per `primary_type_fqn` (symbol/type) by default; set `chunks=true` to restore chunk-level output. When deduped, each hit includes a `chunks` field (≥1) indicating how many chunks were collapsed into that hit.
 
-> **Intel Mac (graph-only) installs:** `search` runs the **lexical backend** — BM25 keyword ranking over the symbol graph's LadybugDB full-text index instead of embeddings, behind this same contract. Same `query`/`table`/`filter`/`limit`/`chunks` behavior; results are keyword-ranked (not semantic), `hybrid` is ignored, `sql`/`yaml` tables aren't indexed (only Java symbols), and an `advisories` entry + `lexical_mode=true` flag note the mode. Structural discovery (`find`/`describe`/`neighbors`/`resolve`) is unaffected.
+> **Intel Mac (graph-only) installs:** `search` runs the **lexical backend** — BM25 keyword ranking over the symbol graph's LadybugDB full-text index instead of embeddings, behind this same contract. Same `query`/`filter`/`limit`/`chunks` behavior; results are keyword-ranked (not semantic), `hybrid` is ignored, and an `advisories` entry + `lexical_mode=true` flag note the mode. Structural discovery (`find`/`describe`/`neighbors`/`resolve`) is unaffected.
 
 #### `find`
 

@@ -470,8 +470,8 @@ jrag connection chat-core                     # cross-service connections (inbou
 #### Semantic search
 
 ```bash
-jrag search "assign a chat agent"   # semantic over Lance (java table)
-jrag search "kafka" --table all     # java + sql + yaml tables
+jrag search "assign a chat agent"   # semantic over the Lance index
+jrag search "kafka"                 # ranked over indexed JVM sources
 ```
 
 See [`jrag search`](#jrag-search) below for the full flag reference (hybrid, explain, dedup, pagination, role/framework filters, generated-source filtering).
@@ -573,8 +573,7 @@ jrag search "service" --limit 20 --offset 20
 ```
 
 **Key flags:**
-- `--table {java,sql,yaml,all}` — Which content table to search (default: `java`).
-- `--hybrid` — Enable vector + keyword hybrid search (single table only).
+- `--hybrid` — Enable vector + keyword hybrid search.
 - `--explain` — Include score breakdown (distance, role weight, symbol bonus).
 - `--chunks` — Show every chunk (default collapses to one row per symbol/type).
 - `--limit N` — Max hits to return (default 10).

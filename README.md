@@ -126,8 +126,8 @@ jrag flow /chat/assign                    # request flow through a route
 jrag connection chat-core                 # cross-service connections
 
 # Semantic search
-jrag search "assign a chat agent"         # semantic over Lance (java table)
-jrag search "kafka" --table all           # java + sql + yaml tables
+jrag search "assign a chat agent"         # semantic over the Lance index
+jrag search "kafka"                       # ranked over indexed sources
 jrag search "audit" --hybrid              # vector + keyword hybrid
 jrag search "audit" --offset 5            # paginated
 ```

@@ -5,14 +5,14 @@ Internal implementation doc (**HOW**). For WHAT/WHY see [DESIGN.md](./DESIGN.md)
 ## Overview
 
 ```
-              Java repo (.java · db/migration/*.sql · application*.yml)
+              Java repo (JVM sources: .java · .kt)
                                  │
    ════════════════════ build time (operator CLI) ════════════════════
    Vectors (CocoIndex flow) → Optimize (Lance tables) → Graph (tree-sitter)
                                  │
               ┌──────────────────┴──────────────────┐
               ▼                                     ▼
-      LanceDB — 3 vector tables             LadybugDB — code_graph.lbug
+      LanceDB — 1 vector table              LadybugDB — code_graph.lbug
       (semantic / hybrid retrieval)         (Cypher structural traversal)
               │                                     │
               └──────────────────┬──────────────────┘
@@ -49,7 +49,7 @@ jrag init|increment|reprocess      java_codebase_rag/cli.py
       ▼
 java_codebase_rag/pipeline.py
   ├─▶ cocoindex update  (java_index_flow_lancedb.py)        [Vectors]
-  │       embed chunks → 3 Lance tables
+  │       embed chunks → the Lance table
   ├─▶ lance_optimize.py   serialized compact + BTree/FTS    [Optimize]
   └─▶ build_ast_graph.py   tree-sitter, 6 passes             [Graph]
           PASS1 nodes · PASS2 wiring (EXTENDS/IMPLEMENTS/INJECTS/DECLARES)
@@ -114,7 +114,7 @@ When a `jrag watch` daemon is running, the **read path gains a warm hop**: the `
 
 ## Stores
 
-**LanceDB** (index dir, e.g. `.java-codebase-rag/`) — 3 tables (`LANCE_TABLE_NAMES`): `javacodeindex_java_code` (Java chunks w/ role · module · microservice · generated), `sqlschemaindex_sql_schema`, `yamlconfigindex_yaml_config`. cocoindex state in `cocoindex.db/`.
+**LanceDB** (index dir, e.g. `.java-codebase-rag/`) — 1 table (`LANCE_TABLE_NAMES`): `javacodeindex_java_code` (JVM-source chunks w/ role · module · microservice · generated). cocoindex state in `cocoindex.db/`. Indexes built by pre-removal versions carry two legacy SQL/YAML table dirs; the first vector run under the current version drops them (`lance_optimize.drop_legacy_tables`), and `erase` drops by `*.lance` directory scan.
 
 **LadybugDB** (`code_graph.lbug`) — 6 node tables: `Symbol`, `Route`, `Client`, `Producer`, `UnresolvedCallSite`, `GraphMeta`; rel tables = the **11** `EDGE_SCHEMA` edges + `UNRESOLVED_AT`. `GraphMeta` carries `ontology_version`, counts, per-pass stats.
 
@@ -138,7 +138,7 @@ Dev workflow (editable install, test-reset ritual, full-suite discipline) — se
 | Constant | Value / location |
 | --- | --- |
 | `ONTOLOGY_VERSION` | `19` — `ast_java.py:87` |
-| `LANCE_TABLE_NAMES` | 3 tables — `java_codebase_rag/lance_optimize.py:35` |
+| `LANCE_TABLE_NAMES` | 1 table — `java_codebase_rag/lance_optimize.py` |
 | Graph passes | 6 (labels `build_ast_graph.py:83`) |
 | Incremental cap | `expansion_cap=50` — `build_ast_graph.py:3800` |
 | Config precedence | `config.py:3` |

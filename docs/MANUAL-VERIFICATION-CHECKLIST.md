@@ -130,11 +130,10 @@ members, 71 injects.
 
 **Verification prompt:**
 
-> Run `jrag tables` and confirm tables include `java` (and others you
-> expect). Then call MCP `search` with
-> `{"query":"main","table":"java","limit":1}`. At least one hit?
+> Run `jrag tables` and confirm the `java` table is listed. Then call MCP
+> `search` with `{"query":"main","limit":1}`. At least one hit?
 
-**Expected (calibration):** tables include `java`, `sql`, `yaml`; search
+**Expected (calibration):** tables list `javacodeindex_java_code` only; search
 returns ≥1 chunk when the Lance index exists for the fixture.
 
 **If failing → fix:** missing tables → `jrag reprocess` (slow).

@@ -42,7 +42,7 @@ The integration adds a **parallel graph index** alongside the **vector index**. 
 Java Microservices
           │
           ├── CocoIndex flow (index time) — e.g. java_index_flow_lancedb.py
-          │     ├── Tree-sitter chunking (.java, SQL, YAML, …)
+          │     ├── Tree-sitter chunking (.java, .kt, …)
           │     ├── Embedding generation
           │     └── LanceDB tables ──────────────────► Vector / hybrid retriever
           │
@@ -347,7 +347,7 @@ For complex multi-hop questions, add a self-correction loop:[^10][^23]
 
 ## 7. Implementation stack in this repository
 
-- **Vector store:** **LanceDB** (tables produced by the Java/SQL/Yaml CocoIndex flows the repo uses for indexing).
+- **Vector store:** **LanceDB** (the source-chunk table produced by the CocoIndex flow the repo uses for indexing).
 - **Graph store:** **LadybugDB** (`code_graph.lbug`), populated by `build_ast_graph.py` using **tree_sitter_java** in the DKB style (two-pass ontology, phantom nodes for unresolved targets).[^2]
 - **Query / agent surface:** `server.py` (MCP) + `search_lancedb.py` (CLI); RRF in hybrid search and in `graph_expand`.[^8][^10]
 - For broader **literature and alternatives** (other parsers, third-party graph DBs, and hybrid-retrieval studies), see the DKB paper and the references list below.[^1][^16][^11]

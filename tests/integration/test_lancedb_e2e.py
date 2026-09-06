@@ -290,11 +290,20 @@ def test_lancedb_ignore_file_reduces_indexed_java_files(tmp_path_factory) -> Non
     without_dir = work / "without_ignore"
     shutil.copytree(IGNORE_SMOKE_ROOT, with_dir)
     shutil.copytree(IGNORE_SMOKE_ROOT, without_dir)
+    # The with-ignore corpus carries a project-layer ignore file excluding the
+    # generated/ subtree (the original fixture shipped one under the pre-rename
+    # `.lancedb-mcp/` name and was lost in the on-disk-state rename; the test
+    # writes it explicitly so the fixture stays index-state-free).
+    with_ignore_dir = with_dir / ".java-codebase-rag"
+    with_ignore_dir.mkdir(parents=True, exist_ok=True)
+    (with_ignore_dir / "ignore").write_text(
+        "src/main/java/com/example/generated/\n", encoding="utf-8"
+    )
     shutil.rmtree(without_dir / ".java-codebase-rag", ignore_errors=True)
 
     def run_coco(corpus: Path) -> Path:
         index_dir = corpus / ".java-codebase-rag"
-        index_dir.mkdir(parents=True)
+        index_dir.mkdir(parents=True, exist_ok=True)
         app_spec = _cocoindex_flow_specifier(bundle_dir / "src" / "java_codebase_rag" / "index", corpus)
         env = {
             **os.environ,

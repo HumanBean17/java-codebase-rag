@@ -19,6 +19,7 @@ residual commit conflict that two internal compaction passes can still produce.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -29,13 +30,91 @@ from typing import Callable, Literal
 # ``_make_optimize_event``.
 _OptimizeStatus = Literal["running", "done", "failed"]
 
-# Single source of truth for the three Lance table names created by the flow.
+# Single source of truth for the Lance table name created by the flow.
 # Keep in sync with ``search_lancedb.TABLES`` (the values there mirror these).
 LANCE_TABLE_NAMES: tuple[str, ...] = (
     "javacodeindex_java_code",
+)
+
+# Tables written by jrag versions that still indexed SQL/YAML (removed by
+# design — jrag is a JVM-source navigation layer, not a file indexer). Index
+# dirs built by those versions carry these as orphaned ``*.lance`` dirs;
+# ``run_cocoindex_update`` drops them once on the next vector run.
+LEGACY_LANCE_TABLE_NAMES: tuple[str, ...] = (
     "sqlschemaindex_sql_schema",
     "yamlconfigindex_yaml_config",
 )
+
+
+def _drop_lance_dir(index_dir: Path, name: str) -> bool:
+    """Remove one ``<name>.lance`` table dir under *index_dir*.
+
+    Prefers the LanceDB API (which also clears store bookkeeping); falls back
+    to removing the directory from disk when the store cannot drop it (e.g. a
+    corrupt or non-registered table dir). Returns True iff the dir is gone.
+    Logs failures to stderr — never raises into the caller's pipeline run.
+    """
+    table_dir = index_dir / f"{name}.lance"
+    if not table_dir.is_dir():
+        return False
+    try:
+        import lancedb
+
+        try:
+            db = lancedb.connect(str(index_dir))
+            db.drop_table(name)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    if table_dir.exists():
+        try:
+            shutil.rmtree(table_dir)
+        except OSError as exc:
+            print(
+                f"jrag: failed to remove legacy Lance table dir {table_dir}: {exc}",
+                file=sys.stderr,
+            )
+            return False
+    return True
+
+
+def drop_legacy_tables(index_dir: Path) -> list[str]:
+    """Drop the legacy SQL/YAML table dirs if present; return removed names.
+
+    Idempotent: returns ``[]`` when none are present. Called once per vector
+    run by ``pipeline.run_cocoindex_update`` so existing indexes migrate
+    automatically.
+    """
+    if not index_dir.is_dir():
+        return []
+    dropped = [
+        name
+        for name in LEGACY_LANCE_TABLE_NAMES
+        if _drop_lance_dir(index_dir, name)
+    ]
+    for name in dropped:
+        print(
+            f"jrag: dropped legacy Lance table {name} (SQL/YAML indexing removed)",
+            file=sys.stderr,
+        )
+    return dropped
+
+
+def drop_all_tables_by_scan(index_dir: Path) -> list[str]:
+    """Drop EVERY ``*.lance`` table dir found under *index_dir* by scan.
+
+    Directory-scan based, so it also removes tables the store cannot list
+    (corrupt manifests). Used by ``jrag erase``; returns removed names.
+    """
+    if not index_dir.is_dir():
+        return []
+    dropped = []
+    for table_dir in sorted(index_dir.glob("*.lance")):
+        name = table_dir.name[: -len(".lance")]
+        if _drop_lance_dir(index_dir, name):
+            dropped.append(name)
+    return dropped
 
 
 def _make_optimize_event(

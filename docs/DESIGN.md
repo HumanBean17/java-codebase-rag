@@ -4,7 +4,7 @@ Internal design doc (**WHAT + WHY**). For HOW see [ARCHITECTURE.md](./ARCHITECTU
 
 ## TL;DR
 
-Deterministic tree-sitter graph + vector index for Java; agents get 5 MCP tools that walk a typed ontology **one hop at a time**; graph and vectors are complementary, empties are classified honestly, the file always beats the index, and `ONTOLOGY_VERSION` is the rebuild / staleness contract.
+Deterministic tree-sitter graph + vector index for Java; agents get 5 MCP tools that walk a typed ontology **one hop at a time**, a `jrag prime` SessionStart payload for orientation, and a CLI with one command per intent; graph and vectors are complementary, empties are classified honestly, the file always beats the index, and `ONTOLOGY_VERSION` is the rebuild / staleness contract.
 
 
 ## What this is
@@ -31,9 +31,7 @@ One repo, two stores, two audiences:
 
 | Source | Store | Notes |
 | --- | --- | --- |
-| Java production sources | Lance chunks + graph Symbols | tree-sitter; tests/build/CI excluded |
-| SQL (Flyway `db/migration`) | Lance chunks only | text + embedding |
-| YAML (`application*.yml`) | Lance chunks only | text + embedding |
+| JVM production sources (`.java`/`.kt`) | Lance chunks + graph Symbols | tree-sitter; tests/build/CI excluded; Kotlin when its grammar imports |
 
 **Graph model** — 4 agent-visible node kinds: `Symbol` (types + methods), `Route` (inbound HTTP/messaging), `Client` (outbound HTTP), `Producer` (outbound async). Edges group into type wiring (`EXTENDS`/`IMPLEMENTS`/`INJECTS`), containment (`DECLARES*`), method calls (`CALLS`), overrides (`OVERRIDES`), service boundary (`EXPOSES`), and cross-service (`HTTP_CALLS`/`ASYNC_CALLS`). Full taxonomy + navigation: [`docs/EDGE-NAVIGATION.md`](./EDGE-NAVIGATION.md), [`docs/AGENT-GUIDE.md`](./AGENT-GUIDE.md).
 
@@ -50,6 +48,7 @@ One repo, two stores, two audiences:
 ## Non-goals (by design)
 
 - Not a test/build/CI indexer — read those files directly.
+- Not a config/migration file indexer — SQL, YAML, `.properties`, and XML are never indexed; grep and read them directly.
 - Not a reflection / dynamic-dispatch oracle — `CALLS` is static only.
 - Not git history — use `git log` / `blame`.
 - Not re-indexable from MCP — only the operator CLI rebuilds.

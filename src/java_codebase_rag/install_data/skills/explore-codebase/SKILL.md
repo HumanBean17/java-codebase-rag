@@ -17,7 +17,7 @@ Use any time you must search, locate, navigate, or explore. **Do NOT use when** 
 
 ## Tool Inventory
 
-- **Graph (jrag MCP):** `search`, `find`, `describe`, `neighbors`, `resolve`. Node kinds: `Symbol` (types/methods), `Route` (HTTP/messaging entry points), `Client` (outbound HTTP), `Producer` (outbound async). Indexed content: Java + SQL + YAML (`table`: `java`, `sql`, `yaml`, `all`).
+- **Graph (jrag MCP):** `search`, `find`, `describe`, `neighbors`, `resolve`. Node kinds: `Symbol` (types/methods), `Route` (HTTP/messaging entry points), `Client` (outbound HTTP), `Producer` (outbound async). Indexed content: JVM sources (`.java`/`.kt`) only — SQL/YAML/config are not indexed; grep and read them directly.
 - **File-system:** `Grep` (content/regex), `Glob` (name/path patterns), `Read` (`offset`/`limit` for large files).
 - **Other:** `Bash` (read-only: `git log`, `git blame`, `ls`, `find`), `WebSearch`/`WebFetch`.
 
@@ -42,7 +42,7 @@ Use any time you must search, locate, navigate, or explore. **Do NOT use when** 
 | Impact of changing X? | bounded `neighbors` `in` loop (`CALLS`, `INJECTS`, …) | `Grep` fallback |
 | Find files / text | `Glob` / `Grep` | `Read` |
 | Who changed X and when? | Bash: `git log`/`git blame` | — |
-| "How is this configured?" | `Glob` + `Grep`; `search(query=…, table="yaml")` | `Read` sections |
+| "How is this configured?" | `Glob` + `Grep` (config files are not indexed) | `Read` sections |
 
 **Escalation:** ① Most targeted tool first → ② fall back gracefully (graph empty → `Grep`/`Glob`) → ③ cross-validate (graph vs file disagree → **trust the file**).
 
@@ -124,7 +124,7 @@ Prefer `resolve` → `describe(id=…)` over `describe(fqn=…)` when FQN may co
 
 ### Tool signatures
 
-- **`search`** — `query`, `table` (`java`|`sql`|`yaml`|`all`), `hybrid` (bool), `limit` (5), `offset`, `path_contains`, optional `filter` (symbol only).
+- **`search`** — `query`, `hybrid` (bool), `limit` (5), `offset`, `path_contains`, optional `filter` (symbol only).
 - **`find`** — `kind` (`symbol`|`route`|`client`|`producer`), **`filter`** (required), `limit` (25), `offset`.
 - **`describe`** — `id` (any) or `fqn` (symbol; `id` wins). Returns node + `edge_summary`.
 - **`resolve`** — `identifier`, optional `hint_kind`.
@@ -148,7 +148,7 @@ Prefer `resolve` → `describe(id=…)` over `describe(fqn=…)` when FQN may co
 | Empty `neighbors` | Read `describe.edge_summary`; check edge type + direction |
 | Cannot find symbol | `resolve`/`search`; `find` with `fqn_contains`; fallback `Grep` |
 | `find` too broad | Add `microservice`, `fqn_contains`, `path_contains`, `topic_contains` |
-| Empty `search` | Try `table="all"`; `find` with `fqn_contains`; `Grep` |
+| Empty `search` | Broaden the query; `find` with `fqn_contains`; `Grep` |
 | Empty across tools | Index missing/stale → `Grep`/`Glob`/`Read`; ask operator to rebuild |
 | Graph vs file disagree | **Trust the file**; report stale index |
 | Mixed composed families on one id | Split — type keys need type id; override keys need method id |
@@ -162,4 +162,4 @@ Prefer `resolve` → `describe(id=…)` over `describe(fqn=…)` when FQN may co
 - **"Where is X used?":** `resolve`/`search` → `neighbors("in", ["CALLS","INJECTS","IMPLEMENTS"])` → `Grep` fallback → report sites with file:line.
 - **"Find all Y":** structural → `find(kind=…, filter={…})`; textual → `Grep`; broad → `Glob`+`Grep`. Summarize, don't dump.
 - **"Trace flow A→B":** resolve both → walk `CALLS`/`EXPOSES`/`HTTP_CALLS` from A → `Grep` gaps → report with file:line.
-- **"How is this configured?":** `Glob` `**/application*.yml` → `Grep` the key → `Read` sections → `search(query=…, table="yaml")` supplement.
+- **"How is this configured?":** `Glob` `**/application*.yml` → `Grep` the key → `Read` sections (config/migration files are not indexed — grep them directly).

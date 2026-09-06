@@ -23,7 +23,7 @@ If `jrag` is missing, run the module entrypoint:
 
 ### `install`
 
-Interactive setup wizard that walks users through Java source detection, embedding model selection, agent host configuration, artifact deployment, and YAML config generation. Use `--non-interactive` for CI/automation.
+Interactive setup wizard that walks users through Java source detection, embedding model selection, agent host configuration, agent-surface wiring (SessionStart hook or MCP entry), and YAML config generation. Use `--non-interactive` for CI/automation.
 
 ```bash
 # Interactive mode
@@ -63,11 +63,11 @@ jrag install --scope user
 2. Retrieval mode + embedding model — `vectors` (semantic, recommended) or `bm25` (keyword, offline); for `vectors`, model auto-download or local path. The model question is skipped for `bm25` and on graph-only installs.
 3. Agent host selection — Claude Code, Qwen Code, GigaCode (multi-select).
 4. Install scope — project or user.
-5. Surface selection — `cli` (recommended, `jrag` skill+subagent) or `mcp` (stdio server + skill + subagent). Re-runs pre-fill the prior surface.
-6. Surface entrypoint resolution + artifact deployment — config (mcp only), skill, agent files.
+5. Surface selection — `cli` (recommended: prime hook) or `mcp` (stdio MCP server). Re-runs pre-fill the prior surface.
+6. Surface entrypoint resolution + deployment — the SessionStart prime hook (`cli`) or the MCP server entry (`mcp`). Neither surface deploys files.
 7. Index + finish — YAML generation, `.gitignore` update, `init`. Stage 7's indexing sub-step renders the unified `Vectors → Optimize → Graph` progress on **stderr** (see [Indexing progress](#indexing-progress-stderr)); the wizard's conversational stdout is unchanged.
 
-**Re-running `install`:** If `.java-codebase-rag.yml` exists, the installer shows current values and offers "Update" (pre-filled) or "Start fresh". Existing MCP entries are updated in-place (merged, not duplicated). Skill/agent files trigger overwrite confirmation.
+**Re-running `install`:** If `.java-codebase-rag.yml` exists, the installer shows current values and offers "Update" (pre-filled) or "Start fresh". Existing MCP entries are updated in-place (merged, not duplicated). The SessionStart hook merges idempotently — keyed on its command, never duplicated, and never touching unrelated hooks.
 
 #### Multi-system workspace
 
@@ -99,7 +99,7 @@ Detection recognises the multi-system layout, prints the systems it found (`Mult
 
 ### `update`
 
-Post-upgrade refresh: overwrites skill and agent files with the latest shipped versions and updates the MCP command path. If an index exists, also runs an incremental Lance + graph catch-up (same as `increment`). Can also switch the agent surface (`mcp` ↔ `cli`) for an existing install. Requires a prior `install` run.
+Post-upgrade refresh: brings the deployed surface's entry up to date — the SessionStart prime hook's command on the `cli` surface, the MCP server command path on the `mcp` surface — and removes any legacy 0.12.x skill/agent files still on disk. If an index exists, also runs an incremental Lance + graph catch-up (same as `increment`). Can also switch the agent surface (`mcp` ↔ `cli`) for an existing install. Requires a prior `install` run.
 
 ```bash
 # Refresh after pip upgrade
@@ -118,15 +118,16 @@ jrag update --surface mcp      # cli → mcp
 ```
 
 **Flags:**
-- `--force` — Overwrite all artifacts even if content matches.
+- `--force` — Overwrite all artifacts even if content matches. (Effectively inert for the hook: it is content-addressed by the resolved `jrag` path, so a matching entry is already current.)
 - `--dry-run` — Print changes without writing files.
-- `--surface {mcp,cli}` — Switch agent surface. Tears down the old surface's artifacts (removes just the `jrag-mcp` MCP entry on `mcp`→`cli`; removes the `jrag` skill/subagent on `cli`→`mcp`), deploys the new surface's, and rewrites the install marker so the switch persists. Omit to keep the current surface; on a TTY you'll be prompted (cursor on the current surface).
+- `--surface {mcp,cli}` — Switch agent surface. Tears down the old surface's entry (removes just the `jrag-mcp` MCP entry on `mcp`→`cli`; removes the SessionStart prime hook on `cli`→`mcp`), deploys the new surface's, and rewrites the install marker so the switch persists. Omit to keep the current surface; on a TTY you'll be prompted (cursor on the current surface).
 - `--quiet` / `-q` — Suppress the indexing progress stream on stderr (wizard stdout unchanged).
 - `--verbose` / `-v` — Raw-relay subprocess output during the indexing sub-step (no progress bar).
 
 **Behavior:**
-- Detects previously configured agent hosts (reads the `.java-codebase-rag.hosts` marker; falls back to scanning project- and user-level MCP config files).
-- Refreshes skill and agent files (versioned assets from the package). On the `mcp` surface, also updates the MCP entrypoint path if `jrag-mcp` has moved.
+- Detects previously configured agent hosts (reads the `.java-codebase-rag.hosts` marker — one `surface` value (`mcp`|`cli`) per host; falls back to scanning project- and user-level MCP config files).
+- Refreshes the deployed surface: on `cli`, re-points the prime hook at the current `jrag` path (no-op when already current); on `mcp`, updates the MCP entrypoint path if `jrag-mcp` has moved.
+- Removes the four legacy 0.12.x artifact files wherever they still exist in the scope — `skills/explore-codebase/SKILL.md`, `skills/explore-codebase-cli/SKILL.md`, `agents/explorer-rag-enhanced.md`, `agents/explorer-rag-cli.md` — so upgrades from any 0.12.x clean up regardless of which surface was installed then.
 - With `--surface` (or the interactive prompt), migrates each host whose recorded surface differs: tears down the old surface, deploys the new one, rewrites the marker. Non-interactive `update` without `--surface` keeps the current surface.
 - Runs an incremental index update (Lance + graph) if an index exists — same as `jrag increment`. The indexing sub-step renders the unified `Vectors → Optimize → Graph` progress on **stderr** (see [Indexing progress](#indexing-progress-stderr)); it no longer runs silently.
 
@@ -494,8 +495,8 @@ jrag connection chat-core                     # cross-service connections (inbou
 #### Semantic search
 
 ```bash
-jrag search "assign a chat agent"   # semantic over Lance (java table)
-jrag search "kafka" --table all     # java + sql + yaml tables
+jrag search "assign a chat agent"   # semantic over the Lance index
+jrag search "kafka"                 # ranked over indexed JVM sources
 ```
 
 See [`jrag search`](#jrag-search) below for the full flag reference (hybrid, explain, dedup, pagination, role/framework filters, generated-source filtering).
@@ -595,8 +596,7 @@ jrag search "service" --limit 20 --offset 20
 ```
 
 **Key flags:**
-- `--table {java,sql,yaml,all}` — Which content table to search (default: `java`).
-- `--hybrid` — Enable vector + keyword hybrid search (single table only).
+- `--hybrid` — Enable vector + keyword hybrid search.
 - `--explain` — Include score breakdown (distance, role weight, symbol bonus).
 - `--chunks` — Show every chunk (default collapses to one row per symbol/type).
 - `--limit N` — Max hits to return (default 10).

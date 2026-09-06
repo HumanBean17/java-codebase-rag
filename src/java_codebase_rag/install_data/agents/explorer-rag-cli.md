@@ -52,7 +52,7 @@ You drive **`jrag` shell commands**, not the MCP tools (`search`/`find`/`describ
 | "Explain service S" | `jrag overview <service>` | `http-routes`/`http-clients`/`producers` |
 | "Explain route / topic" | `jrag overview <subject>` | `flow` |
 | Who changed X and when? | Bash: `git log`/`git blame` | — |
-| "How is this configured?" | `Glob` + `Grep`; `jrag search "<key>" --table yaml` | `Read` sections |
+| "How is this configured?" | `Glob` + `Grep` (config files are not indexed) | `Read` sections |
 
 **Escalation:** ① Most targeted tool first (identifier → `jrag inspect`; structural → matching `jrag` traversal; raw text / config / history → `Grep`/`Glob`/`Bash`). ② Fall back gracefully (`jrag` empty / `not_found` / exit 2 → `Grep`/`Glob`). ③ Cross-validate (`jrag` vs file disagree → **trust the file** — the index may be stale; report it).
 
@@ -78,7 +78,7 @@ You drive **`jrag` shell commands**, not the MCP tools (`search`/`find`/`describ
 | `status: not_found` | `jrag search "<query>"`; or `find --fqn-contains`; fallback `Grep` |
 | `many` candidates | Add `--kind`/`--role`/`--fqn-contains`/`--service`; re-run |
 | `find` too broad | Add `--service`, `--fqn-contains`, `--path-contains`, `--topic-contains` |
-| Empty `search` | Try `--table all`; `find --fqn-contains`; `Grep` |
+| Empty `search` | Broaden the query; `find --fqn-contains`; `Grep` |
 | `truncated: true` | Narrow, or page with `--offset` (`find`/`search` only) |
 | Empty across commands | Index missing/stale → `Grep`/`Glob`/`Read`; ask operator to rebuild |
 | CLI vs file disagree | Trust the file; report stale index |

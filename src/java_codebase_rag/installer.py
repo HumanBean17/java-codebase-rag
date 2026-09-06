@@ -692,7 +692,7 @@ def select_retrieval(
     print(
         "Note: 'vectors' needs an embedding model (auto-downloaded from Hugging "
         "Face, or a local path); 'bm25' is keyword search — no model, no "
-        "downloads, works offline. In bm25 mode the sql/yaml tables are not "
+        "downloads, works offline. In bm25 mode the Lance source table is not "
         "searched (Java/Kotlin symbols only)."
     )
 

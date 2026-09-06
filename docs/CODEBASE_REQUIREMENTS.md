@@ -335,24 +335,18 @@ Beyond role weights, Java hits get an additive **symbol-match bonus**
 
 ### A.6 Files & resources picked up by the vector index
 
-The CocoIndex flow indexes only:
+The CocoIndex flow indexes only JVM sources:
 
 - `**/*.java` and `**/*.kt` (both land in the same `JavaLanceChunk` table;
   Kotlin is skipped if `tree-sitter-kotlin` doesn't import)
-- `**/src/main/resources/db/migration/*.sql` (Flyway naming convention)
-- `**/src/main/resources/application*.yml` / `application*.yaml`
 
-**Recommendations:**
-
-- **Use Flyway and put migrations under `db/migration/`.** Liquibase
-  XML/YAML changelogs and `schema.sql`/`data.sql` are not indexed. Add
-  patterns in B.5 if you use them.
-- **Keep Spring config in `application*.yml`.** Profile-specific files
-  (`application-prod.yml`) are picked up by the wildcard. Properties
-  files (`*.properties`) are *not* indexed — consider migrating to YAML
-  or extend the patterns (Section B.5).
-- **Don't keep secrets in indexed YAML.** They become embeddings and
-  are searchable. Use `${ENV_VAR}` placeholders.
+Everything else is **not indexed by design**: Flyway/Liquibase migrations,
+`schema.sql`, `application*.yml`, `*.properties`, and XML config never become
+chunks or graph rows. jrag is a navigation layer for JVM sources, not a file
+indexer — grep and read non-source files directly when you need them. A
+practical consequence: nothing you put in config or migration files is
+embedded or searchable through the index, so secrets in YAML are not exposed
+via `search` (they remain on disk for anyone with repo access, as always).
 
 ### A.7 Repository hygiene
 
@@ -523,28 +517,7 @@ a **graph re-build** is required if you change module / microservice
 inference (and the `ONTOLOGY_VERSION` bump triggers it automatically
 when the schema changes).
 
-### B.5 Index more file types (properties, Liquibase, Kotlin DSL configs)
-
-You'd do this if:
-
-- you use `*.properties` instead of YAML;
-- you use Liquibase (`db/changelog/*.xml` or `*.yaml`);
-- you keep config in `bootstrap.yml`, `*.conf` (HOCON), or `*.toml`.
-
-**File:** `java_index_flow_lancedb.py`
-**Symbol:** `app_main()`'s `localfs.walk_dir(... included_patterns=[...])`
-calls (one per table — Java / SQL / YAML).
-
-Add patterns to the existing `yaml_files` matcher, or declare a new
-`@dataclass` chunk type + new `@coco.fn process_xxx_file` + new table.
-
-For brand-new file types you'll also want to teach the MCP server what
-table to expose: see `search_lancedb.py::TABLES` (the dict mapping
-`"java"` / `"sql"` / `"yaml"` to LanceDB table names).
-
-A **full re-index** is required.
-
-### B.6 Tune chunk sizes
+### B.5 Tune chunk sizes
 
 You'd do this if:
 
@@ -553,12 +526,12 @@ You'd do this if:
   classes (good in theory, but means less granularity in results).
 
 **File:** `java_index_v1_common.py`
-**Symbols:** `JAVA_CHUNK`, `SQL_CHUNK`, `YAML_CHUNK` — `(chunk_size,
+**Symbols:** `JAVA_CHUNK` — `(chunk_size,
 min_chunk_size, overlap)`.
 
 Re-index after changing.
 
-### B.7 Switch the embedding model
+### B.6 Switch the embedding model
 
 You'd do this if:
 
@@ -579,7 +552,7 @@ You'd do this if:
 
 A **full re-index** is required.
 
-### B.8 Disable / replace the DTO classifier
+### B.7 Disable / replace the DTO classifier
 
 You'd do this if:
 
@@ -598,7 +571,7 @@ inference entirely.
 
 Rebuild the graph and re-run the indexer.
 
-### B.9 Add a new edge type to the graph
+### B.8 Add a new edge type to the graph
 
 You'd do this if:
 
@@ -634,7 +607,7 @@ the same conventions.
 | Everything ranks as `OTHER` | A.2 (stereotypes) → B.1 |
 | Sparse `INJECTS` graph | A.4 (DI patterns) → B.3 |
 | Wrong class wins for "what does X do?" | A.5 (naming) → B.2 (verbs / caps) |
-| Important `.properties` / `.xml` configs missing | A.6 → B.5 |
+| Important `.properties` / `.xml` / SQL / YAML files missing | Expected — non-source files are not indexed (A.6); grep them directly |
 | Recently re-indexed but search is stale | Restart the MCP server; re-run `jrag reprocess` |
 | `context_before` / `context_after` empty | Set `JAVA_CODEBASE_RAG_DEBUG_CONTEXT=1` (see `docs/CONFIGURATION.md` §3) |
 | Graph has lots of phantom nodes | Expected for external libs; inspect via `jrag meta` — only worry if domain types are phantoms (means resolution is failing; check imports). Use `find` / `neighbors` and filter or interpret `resolved` flags on symbols as needed. |

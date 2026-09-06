@@ -10,20 +10,20 @@ re-runs the minimal reindex for the changed file types:
     overwrites the original. ``ladybug`` has no transactions and is
     single-writer, which is why graph builds are subprocesses and reads are
     served from a copy.
-  * a matching ``.sql`` / ``.yml`` / ``.yaml`` resource change -> vectors only
-    (the graph does not index SQL/YAML, so no snapshot is needed).
+
+Non-source files (SQL migrations, application YAML, markdown, …) are not
+indexed by design — jrag is a JVM-source navigation layer — so their events
+classify to no kind and never trigger a reindex.
 
 Change bursts are coalesced: the leading event arms a ``debounce_ms`` timer that
 keeps getting re-armed while events keep arriving, and a single ``reindex`` fires
 once the window goes quiet. ``reindex`` runs on a dedicated background thread so
 the watchdog observer thread is never blocked.
 
-The cocoindex flow indexes three sets (``**/*.java``,
-``**/src/main/resources/db/migration/*.sql``,
-``**/src/main/resources/application*.yml``/``.yaml``). There is NO shared
-iterator (``iter_source_files`` yields the registered source suffixes —
-``.java`` and ``.kt`` when the Kotlin grammar is installed), so the watcher
-defines this UNION and classifies each event path into a reindex kind.
+The cocoindex flow indexes the registered source suffixes (``.java`` and
+``.kt`` when the Kotlin grammar is installed); the watcher classifies each
+event path into a reindex kind via the same backend registry
+(``iter_source_files`` parity).
 
 All status is reported via ``on_event(kind, detail)`` callbacks (kinds:
 ``indexing_started`` / ``vectors`` / ``graph`` / ``indexing_done`` / ``error``);
@@ -58,48 +58,14 @@ log = logging.getLogger(__name__)
 # Suffixes the watcher treats as source files — derived from the language
 # backend registry so this never drifts from what the graph builder parses.
 # ``(".java", ".kt")`` when the kotlin grammar is importable; just
-# ``(".java",)`` on a grammar-absent (e.g. graph-only) install. The non-source
-# resource types (sql/yaml) are matched by the glob helpers below (the cocoindex
-# set has no shared iterator).
+# ``(".java",)`` on a grammar-absent (e.g. graph-only) install.
 INDEXED_SUFFIXES: tuple[str, ...] = tuple(
     suffix for backend in LANG_BACKENDS.values() for suffix in backend.suffixes
 )
 # Reindex kinds that trigger a graph rebuild. The graph indexes every registered
 # source language (java today, kotlin too when its grammar imports), so this is
-# the set of backend ``language_id``s. sql/yaml are vectors-only (no graph row).
+# the set of backend ``language_id``s.
 _GRAPH_INDEXED_KINDS: frozenset[str] = frozenset(LANG_BACKENDS.keys())
-_YAML_SUFFIXES: tuple[str, ...] = (".yml", ".yaml")
-
-# Project-relative anchored prefixes for the two non-java resource globs:
-#   **/src/main/resources/db/migration/*.sql
-#   **/src/main/resources/application*.yml / .yaml
-_SQL_MIGRATION_PREFIX = "src/main/resources/db/migration/"
-_RESOURCES_PREFIX = "src/main/resources/"
-
-
-def _is_migration_sql(rel_posix: str) -> bool:
-    """True iff ``rel_posix`` is a ``.sql`` directly under a ``.../db/migration/`` dir."""
-    if not rel_posix.endswith(".sql"):
-        return False
-    idx = rel_posix.rfind(_SQL_MIGRATION_PREFIX)
-    if idx == -1:
-        return False
-    # The file must sit directly under migration/ (no further path segment).
-    return "/" not in rel_posix[idx + len(_SQL_MIGRATION_PREFIX):]
-
-
-def _is_application_yaml(rel_posix: str) -> bool:
-    """True iff ``rel_posix`` is ``application*.yml``/``.yaml`` directly under
-    a ``.../src/main/resources/`` dir."""
-    name = rel_posix.rsplit("/", 1)[-1]
-    if not name.startswith("application"):
-        return False
-    if not name.endswith((".yml", ".yaml")):
-        return False
-    idx = rel_posix.rfind(_RESOURCES_PREFIX)
-    if idx == -1:
-        return False
-    return "/" not in rel_posix[idx + len(_RESOURCES_PREFIX):]
 
 
 class _ChangeHandler(FileSystemEventHandler):
@@ -251,23 +217,18 @@ class SourceWatcher:
         except Exception:
             return set()
         try:
-            rel = path.resolve().relative_to(self._source_root_resolved).as_posix()
+            path.resolve().relative_to(self._source_root_resolved)
         except ValueError:
             return set()
         # Source languages (.java, .kt when registered) dispatch via the backend
         # registry: a change yields its backend's ``language_id`` reindex kind,
         # which triggers the graph rebuild (the subprocess graph builder re-walks
         # the tree and parses each file through ``backend_for`` — so a ``.kt``
-        # change reprocesses via KotlinBackend). Unknown suffixes are not source
-        # files and fall through to the resource-glob checks below.
+        # change reprocesses via KotlinBackend). Any other suffix (SQL, YAML,
+        # markdown, …) is not indexed — no kind, no reindex.
         backend = backend_for(path)
         if backend is not None:
             return {backend.language_id}
-        suffix = path.suffix.lower()
-        if suffix == ".sql":
-            return {"sql"} if _is_migration_sql(rel) else set()
-        if suffix in _YAML_SUFFIXES:
-            return {"yaml"} if _is_application_yaml(rel) else set()
         return set()
 
     def _schedule(self, kinds: set[str]) -> None:
@@ -332,10 +293,10 @@ class SourceWatcher:
         kind_list = sorted(kinds)
         self._emit("indexing_started", {"kinds": kind_list})
         try:
-            # Vectors run for every indexed type (java/sql/yaml all flow through
-            # cocoindex) — but only when the vector stack is installed. On a
-            # graph-only install cocoindex is absent and the call would return a
-            # 127 stub; skipping it keeps ``indexing_done`` reachable.
+            # Vectors run for every indexed kind (the source languages all flow
+            # through cocoindex) — but only when the vector stack is installed.
+            # On a graph-only install cocoindex is absent and the call would
+            # return a 127 stub; skipping it keeps ``indexing_done`` reachable.
             if self._vector_enabled:
                 self._emit("vectors", {"kinds": kind_list})
                 vres = run_cocoindex_update(

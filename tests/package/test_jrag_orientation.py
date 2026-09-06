@@ -267,10 +267,10 @@ def test_search_hybrid_calls_hybrid_path(
     )
 
 
-def test_search_table_all_runs_three_tables(
+def test_search_routes_without_table_kwarg(
     monkeypatch, capsys, corpus_root: Path, ladybug_db_path: Path
 ) -> None:
-    """--table all passes table='all' to search_v2 (java+sql+yaml)."""
+    """`jrag search <query>` reaches search_v2 with no table kwarg (single-table)."""
     from java_codebase_rag.mcp import mcp_v2
     from java_codebase_rag.jrag import main
 
@@ -287,10 +287,10 @@ def test_search_table_all_runs_three_tables(
         )
     monkeypatch.setattr(mcp_v2, "search_v2", mock_search_v2)
 
-    rc = main(["search", "--index-dir", env_index, "schema", "--table", "all", "--format", "json"])
+    rc = main(["search", "--index-dir", env_index, "schema", "--format", "json"])
     assert rc == 0
-    assert captured_kwargs.get("table") == "all", (
-        f"expected table='all', got table={captured_kwargs.get('table')!r}"
+    assert "table" not in captured_kwargs, (
+        f"search_v2 must not receive a table kwarg, got {captured_kwargs.get('table')!r}"
     )
 
 

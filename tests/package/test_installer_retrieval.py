@@ -92,10 +92,10 @@ def test_interactive_prompt_defaults_to_prefill(monkeypatch):
     assert seen["default"] == "bm25"
 
 
-def test_interactive_note_discloses_sql_yaml_limit(monkeypatch, capsys):
+def test_interactive_note_discloses_bm25_limit(monkeypatch, capsys):
     """The wizard Note pins the D8 disclosure verbatim.
 
-    Spec D8 requires the sql/yaml limitation on all three surfaces (wizard
+    Spec D8 requires the bm25 limitation on all three surfaces (wizard
     note, docs, advisory), so the exact Note line is asserted here to keep
     them from drifting apart again.
     """
@@ -107,7 +107,7 @@ def test_interactive_note_discloses_sql_yaml_limit(monkeypatch, capsys):
         (
             "Note: 'vectors' needs an embedding model (auto-downloaded from Hugging "
             "Face, or a local path); 'bm25' is keyword search — no model, no "
-            "downloads, works offline. In bm25 mode the sql/yaml tables are not "
+            "downloads, works offline. In bm25 mode the Lance source table is not "
             "searched (Java/Kotlin symbols only)."
         )
     ]

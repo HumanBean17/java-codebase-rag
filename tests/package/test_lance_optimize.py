@@ -235,17 +235,14 @@ async def test_optimize_reports_missing_table_as_skipped(monkeypatch, tmp_path) 
     """A table name absent from the DB is reported skipped, with no exception."""
     from java_codebase_rag import lance_optimize
 
-    # DB contains only the java table; sql + yaml are absent (e.g. a repo with
-    # no SQL/YAML) and must come back as skipped.
+    # DB contains no tables at all (e.g. a vectors run that produced nothing
+    # yet) — every registered name must come back as skipped.
     java_name = lance_optimize.LANCE_TABLE_NAMES[0]
-    java_table = _FakeTable(java_name, [None])
-    conn = _FakeConnection(table_names={java_name}, tables={java_name: java_table})
+    conn = _FakeConnection(table_names=set(), tables={})
     _install_fake_lancedb(monkeypatch, conn)
 
     results = await lance_optimize.optimize_lance_tables(tmp_path, quiet=True)
-    assert results[java_name] == "ok"
-    for missing in lance_optimize.LANCE_TABLE_NAMES[1:]:
-        assert results[missing] == "skipped"
+    assert results[java_name] == "skipped"
 
 
 async def test_optimize_closes_connection_even_on_open_failure(monkeypatch, tmp_path) -> None:
@@ -278,4 +275,59 @@ def test_lance_table_names_constant_matches_search_lancedb_tables() -> None:
     finally:
         sys.path.pop(0)
     assert set(LANCE_TABLE_NAMES) == set(TABLES.values())
-    assert len(LANCE_TABLE_NAMES) == 3
+    assert len(LANCE_TABLE_NAMES) == 1
+
+
+def _make_fake_lance_dir(base: Path, name: str) -> Path:
+    d = base / f"{name}.lance"
+    d.mkdir()
+    (d / "dummy").write_text("not a real table", encoding="utf-8")
+    return d
+
+
+def test_drop_legacy_tables_removes_only_legacy(tmp_path) -> None:
+    """Legacy sql/yaml table dirs are removed; the java table is left alone."""
+    from java_codebase_rag import lance_optimize
+
+    _make_fake_lance_dir(tmp_path, "sqlschemaindex_sql_schema")
+    _make_fake_lance_dir(tmp_path, "yamlconfigindex_yaml_config")
+    java_dir = _make_fake_lance_dir(tmp_path, "javacodeindex_java_code")
+
+    dropped = lance_optimize.drop_legacy_tables(tmp_path)
+
+    assert dropped == ["sqlschemaindex_sql_schema", "yamlconfigindex_yaml_config"]
+    assert not (tmp_path / "sqlschemaindex_sql_schema.lance").exists()
+    assert not (tmp_path / "yamlconfigindex_yaml_config.lance").exists()
+    assert java_dir.is_dir()
+    # Idempotent: nothing left to drop.
+    assert lance_optimize.drop_legacy_tables(tmp_path) == []
+
+
+def test_drop_all_tables_by_scan_removes_every_lance_dir(tmp_path) -> None:
+    """Scan-based drop removes every ``*.lance`` dir, registered or not."""
+    from java_codebase_rag import lance_optimize
+
+    _make_fake_lance_dir(tmp_path, "sqlschemaindex_sql_schema")
+    _make_fake_lance_dir(tmp_path, "yamlconfigindex_yaml_config")
+    _make_fake_lance_dir(tmp_path, "javacodeindex_java_code")
+
+    dropped = lance_optimize.drop_all_tables_by_scan(tmp_path)
+
+    assert dropped == [
+        "javacodeindex_java_code",
+        "sqlschemaindex_sql_schema",
+        "yamlconfigindex_yaml_config",
+    ]
+    assert not any(tmp_path.glob("*.lance"))
+
+
+def test_drop_helpers_are_noop_on_empty_dir(tmp_path) -> None:
+    """Empty or absent index dirs return [] without raising."""
+    from java_codebase_rag import lance_optimize
+
+    assert lance_optimize.drop_legacy_tables(tmp_path) == []
+    assert lance_optimize.drop_all_tables_by_scan(tmp_path) == []
+
+    absent = tmp_path / "no" / "such" / "dir"
+    assert lance_optimize.drop_legacy_tables(absent) == []
+    assert lance_optimize.drop_all_tables_by_scan(absent) == []

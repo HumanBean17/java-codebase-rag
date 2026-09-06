@@ -930,7 +930,6 @@ def _node_matches_filter(
 
 def search_v2(
     query: str,
-    table: str = "java",
     hybrid: bool = False,
     limit: int = 5,
     offset: int = 0,
@@ -1013,21 +1012,10 @@ def search_v2(
                     advisories.append(_GRAPH_ONLY_PLATFORM_ADVISORY)
             else:
                 advisories.append(_GRAPH_ONLY_PLATFORM_ADVISORY)
-            if table in ("sql", "yaml", "all"):
-                if lexical_by_mode:
-                    advisories.append(
-                        "sql/yaml tables are not searched in bm25 (lexical) mode; "
-                        "only Java symbols were searched"
-                    )
-                else:
-                    advisories.append(
-                        "sql/yaml tables are not indexed in graph-only mode; only Java symbols were searched"
-                    )
             if hybrid:
                 advisories.append("hybrid is ignored in lexical mode")
             rows = run_lexical_search(
                 query,
-                table=table,
                 limit=limit,
                 offset=offset,
                 path_contains=path_contains,
@@ -1038,17 +1026,6 @@ def search_v2(
                 graph=graph,
             )
         else:
-            # hybrid + table='all' is unsupported (hybrid fuses vector+FTS on ONE
-            # table); fail fast with a clean envelope BEFORE loading the embedding
-            # model. run_search also guards this — this is the user-facing fast path.
-            if hybrid and table == "all":
-                return SearchOutput(
-                    success=False,
-                    message="hybrid search requires a single table; use java, sql, or yaml (not all)",
-                    advisories=[],
-                    limit=None,
-                    offset=None,
-                )
             model_name = resolved_sbert_model_for_process_env(SBERT_MODEL)
             device = os.environ.get("SBERT_DEVICE") or None
             try:
@@ -1077,15 +1054,12 @@ def search_v2(
             uri_path = Path(uri)
             if not uri.startswith(("s3://", "gs://", "az://")) and uri_path.exists():
                 uri = str(uri_path.resolve())
-            table_keys = list(TABLES) if table == "all" else [table]
-
             # Graceful fallback: if hybrid=True and FTS index is missing (old index),
             # retry with hybrid=False and return vector-only results with an advisory.
             try:
                 rows = run_search(
                     query,
                     uri=uri,
-                    table_keys=table_keys,
                     hybrid=hybrid,
                     limit=limit,
                     offset=offset,
@@ -1107,13 +1081,13 @@ def search_v2(
                     exclude_generated=nf.exclude_generated if nf else None,
                     generated_only=nf.generated_only if nf else None,
                     dedup_by_fqn=dedup,
-                    # Always-on 3-list RRF fusion (vector + graph + BM25) on the java
-                    # path — design spec, issue #431. run_search guards this to the
-                    # java single-table path and degrades silently to pure-vector when
-                    # the graph/FTS index is unavailable. Omitting this kwarg left the
-                    # fusion dormant for every user-facing search (jrag search / MCP
-                    # search); see the search_v2 graph_expand integration test.
-                    graph_expand=(table == "java"),
+                    # Always-on 3-list RRF fusion (vector + graph + BM25) — design
+                    # spec, issue #431. run_search degrades silently to pure-vector
+                    # when the graph/FTS index is unavailable. Omitting this kwarg
+                    # left the fusion dormant for every user-facing search (jrag
+                    # search / MCP search); see the search_v2 graph_expand
+                    # integration test.
+                    graph_expand=True,
                 )
             except Exception as exc:
                 # Check if this is a missing-FTS error (old index built before PR-SEARCH-3)
@@ -1124,7 +1098,6 @@ def search_v2(
                     rows = run_search(
                         query,
                         uri=uri,
-                        table_keys=table_keys,
                         hybrid=False,  # Fallback to vector-only
                         limit=limit,
                         offset=offset,
@@ -1140,11 +1113,11 @@ def search_v2(
                         exclude_generated=nf.exclude_generated if nf else None,
                         generated_only=nf.generated_only if nf else None,
                         dedup_by_fqn=dedup,
-                        graph_expand=(table == "java"),  # 3-list fusion survives the FTS fallback
+                        graph_expand=True,  # 3-list fusion survives the FTS fallback
                     )
                     advisories.append(
-                        f"hybrid unavailable on table '{table}' (FTS index missing on this index built before "
-                        f"PR-SEARCH-3); fell back to vector-only — reindex to enable hybrid"
+                        "hybrid unavailable (FTS index missing on this index built before "
+                        "PR-SEARCH-3); fell back to vector-only — reindex to enable hybrid"
                     )
                 else:
                     # Non-FTS error: surface as structured failure

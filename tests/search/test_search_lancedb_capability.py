@@ -63,7 +63,6 @@ def test_run_search_capability_filter_finds_row(tmp_path) -> None:
     hits = run_search(
         text,
         uri=uri,
-        table_keys=["java"],
         limit=5,
         path_substring=None,
         model_name=SBERT_MODEL,
@@ -93,7 +92,6 @@ def test_run_search_nonmatching_capability_returns_empty(tmp_path) -> None:
     hits = run_search(
         text,
         uri=uri,
-        table_keys=["java"],
         limit=5,
         path_substring=None,
         model_name=SBERT_MODEL,

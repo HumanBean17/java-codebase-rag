@@ -60,8 +60,6 @@ from java_codebase_rag.search.search_scoring import (  # noqa: F401
 
 TABLES: dict[str, str] = {
     "java": "javacodeindex_java_code",
-    "sql": "sqlschemaindex_sql_schema",
-    "yaml": "yamlconfigindex_yaml_config",
 }
 
 # Optional enrichment columns on the java chunk table (absent on older indexes).
@@ -192,10 +190,6 @@ def _apply_chunk_hints(rows: list[dict]) -> None:
     for r in rows:
         lang = r.get("language") or ""
         kind = str(r.get("_kind", ""))
-        if kind == "sql" and not lang:
-            lang = "sql"
-        if kind == "yaml" and not lang:
-            lang = "yaml"
         h = analyze_chunk(r.get("text"), language=str(lang), kind=kind)
         r["_hints"] = {
             "primary_type_hint": h.primary_type_hint,
@@ -425,32 +419,25 @@ def _search_one_table(
     query_vec: np.ndarray,
     limit: int,
     path_predicate: str | None,
-    kind: str,
     hybrid: bool,
     fts_text: str | None,
     extra_predicates: list[str] | None = None,
 ) -> list[dict]:
     tbl = db.open_table(table_name)
-    has_lang = kind == "java"
     table_cols = _table_columns(uri, table_name, db)
-    enriched_cols = table_cols if has_lang else set()
     # `range_start` / `range_end` are needed downstream by `_attach_neighbor_context`
     # to locate the chunk inside its file; select them whenever the schema has them.
     base_cols = ["filename", "text", "start", "end"]
     for col in ("range_start", "range_end"):
         if col in table_cols:
             base_cols.append(col)
-    java_extra = [c for c in JAVA_ENRICHED_COLUMNS if c in enriched_cols] if has_lang else []
+    java_extra = [c for c in JAVA_ENRICHED_COLUMNS if c in table_cols]
     combined_pred = _combine_predicates([path_predicate, *(extra_predicates or [])])
 
     if hybrid:
         ensure_text_fts_index(uri, table_name)
         text_for_fts = fts_text if fts_text is not None else ""
-        columns = (
-            [*base_cols, "language", *java_extra]
-            if has_lang
-            else [*base_cols]
-        )
+        columns = [*base_cols, "language", *java_extra]
         q = (
             tbl.search(
                 query_type="hybrid",
@@ -469,7 +456,7 @@ def _search_one_table(
         with _silence_lance_autoproj_warnings():
             rows = q.to_list()
         for r in rows:
-            r["_kind"] = kind
+            r["_kind"] = "java"
             rs = r.pop("_relevance_score", None)
             r["_hybrid"] = True
             if rs is not None:
@@ -478,11 +465,7 @@ def _search_one_table(
             r["end"] = coerce_position_field(r.get("end"))
         return rows
 
-    columns = (
-        [*base_cols, "language", *java_extra, "_distance"]
-        if has_lang
-        else [*base_cols, "_distance"]
-    )
+    columns = [*base_cols, "language", *java_extra, "_distance"]
     q = tbl.search(query_vec, vector_column_name=VECTOR_COLUMN).select(
         columns
     ).limit(limit)
@@ -490,7 +473,7 @@ def _search_one_table(
         q = q.where(combined_pred, prefilter=True)
     rows = q.to_list()
     for r in rows:
-        r["_kind"] = kind
+        r["_kind"] = "java"
         r["_hybrid"] = False
         # Populate `_score` from `_distance` so the SearchHit.score reflects
         # relevance. The hybrid branch sets `_score` from `_relevance_score`
@@ -957,7 +940,6 @@ def run_search(
     query: str,
     *,
     uri: str,
-    table_keys: list[str],
     limit: int,
     path_substring: str | None,
     model_name: str,
@@ -986,21 +968,10 @@ def run_search(
 ) -> list[dict]:
     effective_hybrid = hybrid
     effective_fts = fts_text
-    if (
-        auto_hybrid
-        and not hybrid
-        and len(table_keys) == 1
-        and looks_like_code_identifier(query)
-    ):
+    if auto_hybrid and not hybrid and looks_like_code_identifier(query):
         effective_hybrid = True
         if effective_fts is None:
             effective_fts = query.strip()
-
-    if effective_hybrid and len(table_keys) != 1:
-        raise ValueError(
-            "hybrid search requires exactly one table; "
-            "use table java, sql, or yaml (not all)."
-        )
 
     path_predicate = (
         _build_path_predicate(path_substring) if path_substring else None
@@ -1034,106 +1005,63 @@ def run_search(
         role_in=role_in, exclude_roles=exclude_roles,
         capability=capability, capability_in=capability_in,
         generated_only=generated_only, exclude_generated=exclude_generated,
-    ) if "java" in table_keys else []
+    )
 
     skip_role_weight = bool(role or role_in or exclude_roles)
     query_toks = _query_tokens(query)
 
-    if len(table_keys) == 1:
-        key = table_keys[0]
-        preds = extra_java if key == "java" else []
-        rows = _search_one_table(
-            TABLES[key],
-            uri=uri,
-            db=db,
-            query_vec=query_vec,
-            limit=need,
-            path_predicate=path_predicate,
-            kind=key,
-            hybrid=effective_hybrid,
-            fts_text=fts_for_hybrid,
-            extra_predicates=preds,
-        )
-        _apply_chunk_hints(rows)
-        # Anchor each java row's start.line on the type declaration instead of
-        # the chunk's first source line (often the package/import line = 1).
-        _refine_java_start_lines(rows)
-        if skip_role_weight:
-            for r in rows:
-                r["_skip_role_weight"] = True
-        _apply_symbol_bonus(rows, query_toks)
-        if effective_hybrid:
-            rows.sort(key=_hybrid_sort_key)
-            # Hybrid: set honest displayed score from composite sort metric, clamped to [0,1]
-            _hybrid_post_sort_normalization(rows)
-        else:
-            rows.sort(key=_vector_sort_key)
-            # Vector: displayed score from the effective (bonus-adjusted) distance,
-            # normalized over the unit-embedding range so a correctly-ranked top
-            # hit never collapses to 0.000 (the cosine map 1 - d²/2 clamps to 0
-            # past √2; weak-but-best matches commonly sit at d ≈ 1.5).
-            for r in rows:
-                comps = r.setdefault("_score_components", {})
-                effective_dist = _effective_distance(comps)
-                r["_score"] = vector_display_score(effective_dist)
-
-        if graph_expand and key == "java" and expand_depth > 0:
-            rows = _graph_expand_merge(
-                rows,
-                query=query,
-                query_vec=query_vec,
-                db=db,
-                uri=uri,
-                limit=need,
-                extra_predicates=extra_java,
-                expand_depth=expand_depth,
-                ladybug_path=ladybug_path,
-                rank_config=rank_config,
-            )
-
-        # Dedup by primary_type_fqn after all sorting/merging, before windowing
-        rows = _dedup_by_fqn(rows, dedup_by_fqn=dedup_by_fqn)
-
-        window = rows[offset : offset + limit]
-        if context_neighbors > 0 and key == "java":
-            _attach_neighbor_context(window, db=db, neighbors=context_neighbors, uri=uri)
-        return window
-
-    merged: list[dict] = []
-    per_table = max(need * 3, need)
-    for key in table_keys:
-        preds = extra_java if key == "java" else []
-        merged.extend(
-            _search_one_table(
-                TABLES[key],
-                uri=uri,
-                db=db,
-                query_vec=query_vec,
-                limit=per_table,
-                path_predicate=path_predicate,
-                kind=key,
-                hybrid=False,
-                fts_text=None,
-                extra_predicates=preds,
-            )
-        )
-    _apply_chunk_hints(merged)
-    _refine_java_start_lines(merged)
+    rows = _search_one_table(
+        TABLES["java"],
+        uri=uri,
+        db=db,
+        query_vec=query_vec,
+        limit=need,
+        path_predicate=path_predicate,
+        hybrid=effective_hybrid,
+        fts_text=fts_for_hybrid,
+        extra_predicates=extra_java,
+    )
+    _apply_chunk_hints(rows)
+    # Anchor each java row's start.line on the type declaration instead of
+    # the chunk's first source line (often the package/import line = 1).
+    _refine_java_start_lines(rows)
     if skip_role_weight:
-        for r in merged:
+        for r in rows:
             r["_skip_role_weight"] = True
-    _apply_symbol_bonus(merged, query_toks)
-    merged.sort(key=_vector_sort_key)
-    # Vector: displayed score from the effective (bonus-adjusted) distance.
-    for r in merged:
-        comps = r.setdefault("_score_components", {})
-        effective_dist = _effective_distance(comps)
-        r["_score"] = vector_display_score(effective_dist)
+    _apply_symbol_bonus(rows, query_toks)
+    if effective_hybrid:
+        rows.sort(key=_hybrid_sort_key)
+        # Hybrid: set honest displayed score from composite sort metric, clamped to [0,1]
+        _hybrid_post_sort_normalization(rows)
+    else:
+        rows.sort(key=_vector_sort_key)
+        # Vector: displayed score from the effective (bonus-adjusted) distance,
+        # normalized over the unit-embedding range so a correctly-ranked top
+        # hit never collapses to 0.000 (the cosine map 1 - d²/2 clamps to 0
+        # past √2; weak-but-best matches commonly sit at d ≈ 1.5).
+        for r in rows:
+            comps = r.setdefault("_score_components", {})
+            effective_dist = _effective_distance(comps)
+            r["_score"] = vector_display_score(effective_dist)
+
+    if graph_expand and expand_depth > 0:
+        rows = _graph_expand_merge(
+            rows,
+            query=query,
+            query_vec=query_vec,
+            db=db,
+            uri=uri,
+            limit=need,
+            extra_predicates=extra_java,
+            expand_depth=expand_depth,
+            ladybug_path=ladybug_path,
+            rank_config=rank_config,
+        )
 
     # Dedup by primary_type_fqn after all sorting/merging, before windowing
-    merged = _dedup_by_fqn(merged, dedup_by_fqn=dedup_by_fqn)
+    rows = _dedup_by_fqn(rows, dedup_by_fqn=dedup_by_fqn)
 
-    window = merged[offset : offset + limit]
+    window = rows[offset : offset + limit]
     if context_neighbors > 0:
         _attach_neighbor_context(window, db=db, neighbors=context_neighbors, uri=uri)
     return window
@@ -1144,11 +1072,6 @@ def main() -> None:
         description="Vector search in LanceDB index.",
     )
     parser.add_argument("query", help="Natural-language search query")
-    parser.add_argument(
-        "--table",
-        choices=["java", "sql", "yaml", "all"],
-        default="java",
-    )
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument(
         "--lancedb-uri",
@@ -1193,14 +1116,6 @@ def main() -> None:
         print(f"Error: LanceDB path missing: {uri_path.resolve()}", file=sys.stderr)
         sys.exit(1)
 
-    keys = list(TABLES) if args.table == "all" else [args.table]
-    if args.hybrid and args.table == "all":
-        print("Error: --hybrid needs a single --table.", file=sys.stderr)
-        sys.exit(2)
-    if args.auto_hybrid and args.table == "all":
-        print("Error: --auto-hybrid needs a single --table.", file=sys.stderr)
-        sys.exit(2)
-
     raw_model = args.model
     if raw_model is None or not str(raw_model).strip():
         model_name = resolved_sbert_model_for_process_env(SBERT_MODEL)
@@ -1211,7 +1126,6 @@ def main() -> None:
         results = run_search(
             args.query,
             uri=str(uri_path),
-            table_keys=keys,
             limit=args.limit,
             path_substring=args.path_contains,
             model_name=model_name,

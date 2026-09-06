@@ -1,6 +1,8 @@
 # Agent Guide — `jrag` MCP
 
-Copy the block between `<!-- BEGIN` and `<!-- END` into your project's `AGENTS.md`, `CLAUDE.md`, or equivalent. It is self-contained: five MCP tools, shared `NodeFilter`, edge taxonomy, tool-selection rules, and recovery moves.
+Human reference for the MCP surface: five MCP tools, shared `NodeFilter`, edge taxonomy, tool-selection rules, and recovery moves. The block between `<!-- BEGIN` and `<!-- END` is kept self-contained — an operator running the MCP surface, or any host without SessionStart hooks, may paste it into the project's `AGENTS.md` / `CLAUDE.md` by hand.
+
+On the `cli` surface no paste-in is needed: `jrag install --surface cli` wires a SessionStart hook that runs `jrag prime --hook-json` at every session start and injects a compact orientation payload (what `jrag` is, the trust rule, live index state, the command surface). See [`JRAG-CLI.md`](./JRAG-CLI.md) § [`jrag prime`](./JRAG-CLI.md#jrag-prime-sessionstart-priming).
 
 ---
 
@@ -12,7 +14,7 @@ Copy the block between `<!-- BEGIN` and `<!-- END` into your project's `AGENTS.m
 
 **Node kinds:** `Symbol` (types and methods), `Route` (HTTP and messaging entry points), `Client` (outbound HTTP call sites), `Producer` (outbound async call sites).
 
-**Indexed content:** Java production sources plus SQL and YAML (use `search` `table`: `java`, `sql`, `yaml`, or `all`).
+**Indexed content:** JVM production sources (`.java`/`.kt`) only. SQL migrations, YAML/properties config, and XML are **not** indexed — grep and read those files directly (the index never wins against the file).
 
 **Ontology: 19** — if results look structurally wrong or empty across tools, the index may be missing, stale, or built with a different `ontology_version`; you cannot re-index via MCP — ask the operator to rebuild.
 
@@ -205,11 +207,11 @@ Prefer **`resolve` → `describe(id=…)`** over **`describe(fqn=…)`** when an
 
 #### `search`
 
-Ranked chunk retrieval. Args: `query`, `table` (`java`|`sql`|`yaml`|`all`, default `java`), `hybrid` (bool), `limit` (default 5), `offset`, `path_contains`, optional `filter` (symbol-applicable `NodeFilter` only), optional `chunks` (bool, default `false`). Returns one row per `primary_type_fqn` (symbol/type) by default; set `chunks=true` to restore chunk-level output. When deduped, each hit includes a `chunks` field (≥1) indicating how many chunks were collapsed into that hit.
+Ranked chunk retrieval. Args: `query`, `hybrid` (bool), `limit` (default 5), `offset`, `path_contains`, optional `filter` (symbol-applicable `NodeFilter` only), optional `chunks` (bool, default `false`). Returns one row per `primary_type_fqn` (symbol/type) by default; set `chunks=true` to restore chunk-level output. When deduped, each hit includes a `chunks` field (≥1) indicating how many chunks were collapsed into that hit.
 
-> **Intel Mac (graph-only) installs:** `search` runs the **lexical backend** — BM25 keyword ranking over the symbol graph's LadybugDB full-text index instead of embeddings, behind this same contract. Same `query`/`table`/`filter`/`limit`/`chunks` behavior; results are keyword-ranked (not semantic), `hybrid` is ignored, `sql`/`yaml` tables aren't indexed (only Java symbols), and an `advisories` entry + `lexical_mode=true` flag note the mode. Structural discovery (`find`/`describe`/`neighbors`/`resolve`) is unaffected.
+> **Intel Mac (graph-only) installs:** `search` runs the **lexical backend** — BM25 keyword ranking over the symbol graph's LadybugDB full-text index instead of embeddings, behind this same contract. Same `query`/`filter`/`limit`/`chunks` behavior; results are keyword-ranked (not semantic), `hybrid` is ignored, and an `advisories` entry + `lexical_mode=true` flag note the mode. Structural discovery (`find`/`describe`/`neighbors`/`resolve`) is unaffected.
 >
-> **Operator-chosen bm25 (`retrieval: bm25`) looks the same:** on any platform the operator can select keyword search at install time (`jrag install --retrieval bm25`), and `search` then runs this same lexical backend — `lexical_mode=true` with a mode-aware advisory, `hybrid` ignored, and the `sql`/`yaml` tables not searched — keyword ranking covers Java/Kotlin symbols only (the Lance tables holding them are never built in lexical mode; leftovers from a prior vectors run are never queried).
+> **Operator-chosen bm25 (`retrieval: bm25`) looks the same:** on any platform the operator can select keyword search at install time (`jrag install --retrieval bm25`), and `search` then runs this same lexical backend — `lexical_mode=true` with a mode-aware advisory, `hybrid` ignored — keyword ranking covers Java/Kotlin symbols only (the Lance source table is never built in lexical mode; leftovers from a prior vectors run are never queried).
 
 #### `find`
 
@@ -326,5 +328,5 @@ These patterns combine the five tools above. Use the decision tree to pick the r
 When MCP behaviour, `NodeFilter` keys, edge labels, or node kinds change:
 
 1. Update this file's copy block and bump the **Ontology:** line to match `ast_java.ONTOLOGY_VERSION`.
-2. Update the five-tool cheat sheet in `README.md` and the "Driving the MCP from an agent" bullet there.
+2. Update the five-tool MCP table in `README.md`.
 3. If enrichment semantics changed, add a "Re-index required" callout in [`docs/CONFIGURATION.md`](./CONFIGURATION.md) §3.

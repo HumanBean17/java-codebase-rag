@@ -840,14 +840,17 @@ def _cmd_erase(args: argparse.Namespace) -> int:
             _rm_any(operator_path)
         if cfg.index_dir.is_dir():
             try:
-                import lancedb
+                # Scan-based: drops every *.lance dir, including tables the
+                # store cannot list (e.g. a corrupt manifest) and the legacy
+                # SQL/YAML dirs from pre-removal indexes.
+                from java_codebase_rag.lance_optimize import drop_all_tables_by_scan
 
-                db = lancedb.connect(str(cfg.index_dir.resolve()))
-                for name in list(db.list_tables()):
-                    try:
-                        db.drop_table(name)
-                    except Exception as exc:
-                        print(f"warning: failed to drop Lance table {name!r}: {exc}", file=sys.stderr)
+                dropped = drop_all_tables_by_scan(cfg.index_dir.resolve())
+                if dropped and not bool(args.quiet):
+                    print(
+                        f"jrag: erase: dropped Lance tables: {', '.join(dropped)}",
+                        file=sys.stderr,
+                    )
             except Exception:
                 pass
         _emit({"success": True, "message": "erase completed"})
@@ -1033,11 +1036,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     install = subparsers.add_parser(
         "install",
-        help="Interactive setup wizard: config, MCP registration, skill/agent deployment, indexing.",
+        help="Interactive setup wizard: config, agent-surface registration, indexing.",
         description=(
             "Interactive setup wizard that guides users through: Java source detection, "
-            "embedding model selection, agent host configuration, artifact deployment, "
-            "and YAML config generation. Use --non-interactive for CI/automation."
+            "embedding model selection, agent host configuration, agent-surface wiring "
+            "(SessionStart prime hook on the cli surface, stdio MCP server entry on the "
+            "mcp surface — no skill/agent files deployed), and YAML config generation. "
+            "Use --non-interactive for CI/automation."
         ),
     )
     install.add_argument(
@@ -1080,10 +1085,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["mcp", "cli"],
         default=None,
         help=(
-            "Agent surface to install: 'mcp' (stdio MCP server + explore-codebase "
-            "skill + explorer-rag-enhanced subagent) or 'cli' (jrag console-script "
-            "skill + explorer-rag-cli subagent, no MCP entry). Omit to choose "
-            "interactively; non-interactive mode defaults to 'mcp'."
+            "Agent surface to install: 'cli' (jrag console-script + SessionStart "
+            "prime hook, no files deployed) or 'mcp' (stdio MCP server entry, "
+            "tools only, no skill/agent artifacts). Omit to choose interactively; "
+            "non-interactive mode defaults to 'cli'."
         ),
     )
     _add_verbosity_flags(install)
@@ -1091,14 +1096,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     update = subparsers.add_parser(
         "update",
-        help="Refresh shipped artifacts (skill, agent, MCP entry) after pip upgrade.",
+        help="Refresh the deployed surface (MCP entry / prime hook) after pip upgrade.",
         description=(
-            "Post-upgrade refresh: overwrites skill and agent files with the latest "
-            "shipped versions and updates the MCP command path. If an index exists, "
-            "also runs an incremental Lance + graph catch-up (same as `increment`). "
-            "Use --dry-run to preview changes without writing. Pass --surface to "
-            "switch between the mcp and cli surfaces (migrates artifacts + marker). "
-            "Requires a prior `install` run."
+            "Post-upgrade refresh: brings the deployed surface's entry up to date — "
+            "the MCP server command path on the mcp surface, the SessionStart prime "
+            "hook command on the cli surface. If an index exists, also runs an "
+            "incremental Lance + graph catch-up (same as `increment`). Use --dry-run "
+            "to preview changes without writing. Pass --surface to switch between "
+            "the mcp and cli surfaces (migrates artifacts + marker). Requires a "
+            "prior `install` run."
         ),
     )
     update.add_argument(
@@ -1116,9 +1122,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["mcp", "cli"],
         default=None,
         help=(
-            "Switch agent surface: 'mcp' or 'cli'. Tears down the old surface's "
-            "artifacts and deploys the new surface's (also rewrites the install "
-            "marker). Omit to keep the current surface; on a TTY you'll be prompted."
+            "Switch agent surface: 'cli' (jrag console-script + SessionStart prime "
+            "hook, no files deployed) or 'mcp' (stdio MCP server entry, tools only, "
+            "no skill/agent artifacts). Tears down the old surface's artifacts and "
+            "deploys the new surface's (also rewrites the install marker). Omit to "
+            "keep the current surface; on a TTY you'll be prompted."
         ),
     )
     _add_verbosity_flags(update)

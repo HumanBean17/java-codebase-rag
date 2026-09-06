@@ -47,7 +47,7 @@ description: "MUST BE USED PROACTIVELY. Universal JVM (Java + Kotlin) codebase e
 | "Explain service S" | `jrag overview <service>` | `http-routes`/`http-clients`/`producers` |
 | "Explain route / topic" | `jrag overview <subject>` | `flow` |
 | Who changed X and when? | Bash: `git log`/`git blame` | — |
-| "How is this configured?" | `Glob` + `Grep`; `jrag search "<key>" --table yaml` | `Read` sections |
+| "How is this configured?" | `Glob` + `Grep` (config files are not indexed) | `Read` sections |
 
 **Escalation:** ① Most targeted tool first (identifier → `jrag inspect`; structural → matching `jrag` traversal; raw text / config / history → `Grep`/`Glob`/`Bash`). ② Fall back gracefully (`jrag` empty / `not_found` / exit 2 → `Grep`/`Glob`). ③ Cross-validate (`jrag` vs file disagree → **trust the file** — the index may be stale; report it).
 
@@ -61,7 +61,7 @@ description: "MUST BE USED PROACTIVELY. Universal JVM (Java + Kotlin) codebase e
 - **"Where is X used?":** `jrag inspect <X>` → `jrag callers <X>` + `jrag dependents <X>` → `Grep` the symbol name as fallback → report sites with file:line.
 - **"Find all Y":** structural → `jrag find --role <ROLE> [--service <S>]`; textual → `Grep`; broad → `Glob`+`Grep`. Summarize, don't dump.
 - **"Trace flow A→B":** `jrag flow <route-A>` → `jrag connection <microservice>` (cross-service seams) → `Grep` the gaps → report with file:line.
-- **"How is this configured?":** `Glob` `**/application*.yml` → `Grep` the key → `Read` sections → `jrag search "<key>" --table yaml`.
+- **"How is this configured?":** `Glob` `**/application*.yml` → `Grep` the key → `Read` sections (config/migration files are not indexed — grep them directly).
 - **"Orient in a new service":** `jrag overview <S>` → `jrag conventions --service <S>` → `jrag map --service <S>` → `jrag http-routes --service <S>`.
 
 ## Recovery Playbook
@@ -74,7 +74,7 @@ description: "MUST BE USED PROACTIVELY. Universal JVM (Java + Kotlin) codebase e
 | `status: not_found` | `jrag search "<query>"`; or `find --fqn-contains …`; fallback `Grep` |
 | `many` candidates | Add `--kind`/`--role`/`--fqn-contains`/`--service`; re-run |
 | `find` too broad | Add `--service`, `--fqn-contains`, `--path-contains`, `--topic-contains` |
-| Empty `search` | Try `--table all`; `find --fqn-contains`; `Grep` |
+| Empty `search` | Broaden the query; `find --fqn-contains`; `Grep` |
 | `truncated: true` | Narrow, or page with `--offset` (`find`/`search` only) |
 | Empty across commands | Index missing/stale → `Grep`/`Glob`/`Read`; ask operator to rebuild (`jrag reprocess`) |
 | CLI vs file disagree | **Trust the file**; report stale index |

@@ -302,8 +302,8 @@ def test_pre_walk_total_divergence_bounded(corpus_root: Path, tmp_path: Path) ->
     """On the fixture, the approximate pre-walk total exactly equals the number of
     files actually processed (the spike measured gap == 0).
 
-    The TRUE processed count is read from the LanceDB tables (distinct
-    ``filename`` values across the three tables) rather than the throttled
+    The TRUE processed count is read from the LanceDB table (distinct
+    ``filename`` values in the source-chunk table) rather than the throttled
     ``done=k`` tick stream: ticks fire only every 25th file, so ``max(done)``
     lands on a multiple of 25 and would mask the real divergence. The accepted
     over-count on larger trees is the ignored / empty / undecodable file count
@@ -320,13 +320,20 @@ def test_pre_walk_total_divergence_bounded(corpus_root: Path, tmp_path: Path) ->
     assert total_match, f"could not parse total from: {total_lines[0]!r}"
     pre_walk_total = int(total_match.group(1))
     # The tick stream is throttled (every 25th file), so it cannot yield the
-    # true processed count. Read the ground truth from the LanceDB tables:
-    # distinct filename values across the three tables the flow populated.
+    # true processed count. Read the ground truth from the LanceDB table:
+    # distinct filename values in the ONE table the flow populated. The
+    # fixture's .sql / application*.yml files exist on disk but are unindexed
+    # (sources-only) — they must contribute neither to the pre-walk total nor
+    # to the table.
     import lancedb
 
     db = lancedb.connect(str(index_dir.resolve()))
     actual_done = 0
-    for tname in ("javacodeindex_java_code", "sqlschemaindex_sql_schema", "yamlconfigindex_yaml_config"):
+    # Single-table contract: exactly one *.lance dir exists after the flow.
+    assert sorted(p.name for p in index_dir.glob("*.lance")) == [
+        "javacodeindex_java_code.lance"
+    ], "expected only the java source table after the flow"
+    for tname in ("javacodeindex_java_code",):
         try:
             tbl = db.open_table(tname)
         except Exception as exc:  # pragma: no cover - table missing only on a broken flow
@@ -334,9 +341,9 @@ def test_pre_walk_total_divergence_bounded(corpus_root: Path, tmp_path: Path) ->
         rows = tbl.search().select(["filename"]).limit(1_000_000).to_list()
         actual_done += len({r["filename"] for r in rows if r.get("filename") is not None})
     # On this fixture the pre-walk matches exactly (gap == 0): all counted
-    # files are non-empty / decodable / not-ignored, and the YAML predicate
-    # was fixed to include application*.yml. The accepted over-count on larger
-    # trees is the ignored / empty file count (the renderer clamps regardless).
+    # files are non-empty / decodable / not-ignored. The accepted over-count
+    # on larger trees is the ignored / empty file count (the renderer clamps
+    # regardless).
     gap = pre_walk_total - actual_done
     assert gap >= 0, (
         f"pre-walk total {pre_walk_total} < actual done {actual_done} (under-count: "

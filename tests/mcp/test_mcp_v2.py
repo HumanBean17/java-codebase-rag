@@ -163,27 +163,43 @@ def test_search_path_contains_filter(monkeypatch, ladybug_graph) -> None:
 
 @needs_vectors
 def test_search_v2_enables_graph_expand_on_java(monkeypatch, ladybug_graph) -> None:
-    """search_v2 must pass graph_expand=True on the java table so the always-on
-    3-list RRF fusion (vector + graph + BM25; design spec, issue #431) actually
-    runs on the user-facing path. This is the wiring contract that let PR #443
-    ship dormant: search_v2 never asked for graph_expand, so _graph_expand_merge
+    """search_v2 must pass graph_expand=True so the always-on 3-list RRF fusion
+    (vector + graph + BM25; design spec, issue #431) actually runs on the
+    user-facing path. This is the wiring contract that let PR #443 ship
+    dormant: search_v2 never asked for graph_expand, so _graph_expand_merge
     (and its BM25 third list) never executed for `jrag search` / MCP `search`."""
     seen: dict[str, Any] = {}
 
     def fake_run_search(query, **kwargs):
         seen["graph_expand"] = kwargs.get("graph_expand")
-        seen["table_keys"] = kwargs.get("table_keys")
         return _fake_search_rows()
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("ChatService", table="java", graph=ladybug_graph)
+    out = search_v2("ChatService", graph=ladybug_graph)
 
     assert out.success is True
-    assert seen.get("table_keys") == ["java"]
     assert seen.get("graph_expand") is True, (
-        "search_v2 must enable graph_expand on the java table; without it the "
+        "search_v2 must enable graph_expand; without it the "
         "vector+graph+BM25 fusion is dormant (the PR #443 wiring bug)"
     )
+
+
+@needs_vectors
+def test_search_v2_single_table_contract(monkeypatch, ladybug_graph) -> None:
+    """search_v2 has no table parameter — the java table is the only table.
+
+    Passing ``table`` must be a loud TypeError, and the default (table-less)
+    call must return hits with the populated hit fields.
+    """
+    monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", lambda *a, **kw: _fake_search_rows())
+    with pytest.raises(TypeError):
+        search_v2("ChatService", table="java", graph=ladybug_graph)
+    out = search_v2("ChatService", hybrid=True, graph=ladybug_graph)
+    assert out.success is True
+    assert out.results
+    for hit in out.results:
+        assert hit.filename
+        assert hit.snippet is not None
 
 
 @needs_vectors
@@ -206,7 +222,7 @@ def test_search_v2_enables_graph_expand_through_hybrid_fts_fallback(
         return _fake_search_rows()
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("server port", table="java", hybrid=True, graph=ladybug_graph)
+    out = search_v2("server port", hybrid=True, graph=ladybug_graph)
 
     assert out.success is True
     assert len(calls) == 2  # initial hybrid attempt + vector-only retry
@@ -277,26 +293,12 @@ def test_search_retrieval_bm25_stack_absent_says_platform_not_rerun(
     assert _BM25_MODE_ADVISORY not in out.advisories
 
 
-def test_search_retrieval_bm25_sql_table_advisory(monkeypatch, ladybug_graph) -> None:
-    monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "bm25")
-    monkeypatch.setattr(
-        "java_codebase_rag.mcp.mcp_v2.run_search", lambda *args, **kwargs: _fake_search_rows()
-    )
-    out = search_v2("ChatService", table="sql", graph=ladybug_graph)
-    assert out.success is True
-    assert out.lexical_mode is True
-    assert (
-        "sql/yaml tables are not searched in bm25 (lexical) mode; "
-        "only Java symbols were searched"
-    ) in out.advisories
-
-
 def test_search_retrieval_bm25_hybrid_ignored_advisory(monkeypatch, ladybug_graph) -> None:
     monkeypatch.setenv("JAVA_CODEBASE_RAG_RETRIEVAL", "bm25")
     monkeypatch.setattr(
         "java_codebase_rag.mcp.mcp_v2.run_search", lambda *args, **kwargs: _fake_search_rows()
     )
-    out = search_v2("ChatService", table="java", hybrid=True, graph=ladybug_graph)
+    out = search_v2("ChatService", hybrid=True, graph=ladybug_graph)
     assert out.success is True
     assert "hybrid is ignored in lexical mode" in out.advisories
     assert "hybrid is ignored in graph-only lexical mode" not in out.advisories
@@ -385,7 +387,7 @@ def test_search_post_model_failure_keeps_plain_envelope(monkeypatch, ladybug_gra
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
 
-    out = search_v2("query", table="java", graph=ladybug_graph)
+    out = search_v2("query", graph=ladybug_graph)
 
     assert out.success is False
     assert out.message == "Some other LanceDB error"
@@ -847,11 +849,6 @@ async def test_find_invalid_kind_rejected(mcp_server) -> None:
         await mcp_server.call_tool("find", {"kind": "method", "filter": {}})
 
 
-async def test_search_invalid_table_rejected(mcp_server) -> None:
-    with pytest.raises(ToolError, match="Input should be"):
-        await mcp_server.call_tool("search", {"query": "foo", "table": "code"})
-
-
 @needs_vectors
 def test_search_filter_accepts_json_string(monkeypatch, ladybug_graph) -> None:
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", lambda *args, **kwargs: _fake_search_rows())
@@ -926,17 +923,6 @@ def test_search_pushes_nodefilter_into_run_search(monkeypatch, ladybug_graph) ->
 
 
 @needs_vectors
-def test_search_all_tables_hybrid_returns_clean_failure(ladybug_graph) -> None:
-    """hybrid + table='all' is unsupported; search_v2 fails fast with a clean
-    success=False envelope BEFORE loading the embedding model (no raw exception
-    escapes to the MCP caller)."""
-    out = search_v2("anything", table="all", hybrid=True, graph=ladybug_graph)
-    assert out.success is False
-    assert out.message is not None and "table" in out.message.lower()
-    assert out.results == []
-
-
-@needs_vectors
 def test_search_hybrid_missing_fts_falls_back_to_vector(monkeypatch, ladybug_graph) -> None:
     """hybrid search on a table missing the FTS index falls back to vector-only
     with an advisory (PR-SEARCH-3) — instead of surfacing a raw Lance error, the
@@ -952,7 +938,7 @@ def test_search_hybrid_missing_fts_falls_back_to_vector(monkeypatch, ladybug_gra
         return _fake_search_rows()
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("server port", table="yaml", hybrid=True, graph=ladybug_graph)
+    out = search_v2("server port", hybrid=True, graph=ladybug_graph)
 
     # Should succeed with vector-only fallback
     assert out.success is True
@@ -977,7 +963,7 @@ def test_search_hybrid_non_fts_error_still_fails(monkeypatch, ladybug_graph) -> 
         raise RuntimeError("Some other LanceDB error")
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("query", table="java", hybrid=True, graph=ladybug_graph)
+    out = search_v2("query", hybrid=True, graph=ladybug_graph)
 
     # Should fail with the error message
     assert out.success is False

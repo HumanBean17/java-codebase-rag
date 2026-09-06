@@ -60,12 +60,12 @@ async def test_tool_input_schema_includes_expected_enums(mcp_server) -> None:
     find_schema = by_name["find"].inputSchema or {}
     neighbors_schema = by_name["neighbors"].inputSchema or {}
 
-    search_table = ((search_schema.get("properties") or {}).get("table") or {})
     find_kind = ((find_schema.get("properties") or {}).get("kind") or {})
     neighbors_direction = ((neighbors_schema.get("properties") or {}).get("direction") or {})
     neighbors_edge_types = ((neighbors_schema.get("properties") or {}).get("edge_types") or {})
 
-    assert {"java", "sql", "yaml", "all"} in _enum_sets(search_table)
+    # Single-table contract: the search tool exposes no `table` selector.
+    assert "table" not in (search_schema.get("properties") or {})
     assert {"symbol", "route", "client", "producer"} in _enum_sets(find_kind)
     assert {"in", "out"} in _enum_sets(neighbors_direction)
     assert {

@@ -290,11 +290,20 @@ def test_lancedb_ignore_file_reduces_indexed_java_files(tmp_path_factory) -> Non
     without_dir = work / "without_ignore"
     shutil.copytree(IGNORE_SMOKE_ROOT, with_dir)
     shutil.copytree(IGNORE_SMOKE_ROOT, without_dir)
+    # The with-ignore corpus carries a project-layer ignore file excluding the
+    # generated/ subtree (the original fixture shipped one under the pre-rename
+    # `.lancedb-mcp/` name and was lost in the on-disk-state rename; the test
+    # writes it explicitly so the fixture stays index-state-free).
+    with_ignore_dir = with_dir / ".java-codebase-rag"
+    with_ignore_dir.mkdir(parents=True, exist_ok=True)
+    (with_ignore_dir / "ignore").write_text(
+        "src/main/java/com/example/generated/\n", encoding="utf-8"
+    )
     shutil.rmtree(without_dir / ".java-codebase-rag", ignore_errors=True)
 
     def run_coco(corpus: Path) -> Path:
         index_dir = corpus / ".java-codebase-rag"
-        index_dir.mkdir(parents=True)
+        index_dir.mkdir(parents=True, exist_ok=True)
         app_spec = _cocoindex_flow_specifier(bundle_dir / "src" / "java_codebase_rag" / "index", corpus)
         env = {
             **os.environ,
@@ -370,10 +379,11 @@ def test_layered_ignore_provided_once_per_flow() -> None:
     provide_count = source.count("builder.provide(IGNORE,")
     assert provide_count == 1, f"Expected 1 builder.provide(IGNORE,) call, found {provide_count}"
 
-    # Count coco.use_context(IGNORE) calls - should be exactly four (process_*_file:
-    # java, kotlin, sql, yaml). Kotlin drains into the same JavaLanceChunk table.
+    # Count coco.use_context(IGNORE) calls - should be exactly two (process_*_file:
+    # java, kotlin). Kotlin drains into the same JavaLanceChunk table. SQL/YAML
+    # extraction is gone by design: jrag indexes JVM sources only.
     use_count = source.count("coco.use_context(IGNORE)")
-    assert use_count == 4, f"Expected 4 coco.use_context(IGNORE) calls, found {use_count}"
+    assert use_count == 2, f"Expected 2 coco.use_context(IGNORE) calls, found {use_count}"
 
     # Verify no leftover LayeredIgnore(project_root).is_ignored calls in process sites
     # (the sentinel grep would catch this, but we assert it here for completeness)
@@ -387,3 +397,20 @@ def test_layered_ignore_provided_once_per_flow() -> None:
                 pytest.fail(f"Found LayeredIgnore(project_root).is_ignored in process_*_file at line {i}")
 
     # All structure checks passed
+
+
+def test_flow_module_has_no_sql_yaml_extraction() -> None:
+    """The flow module defines no SQL/YAML extraction surface (sources only)."""
+    import importlib
+
+    flow = importlib.import_module(
+        "java_codebase_rag.index.java_index_flow_lancedb"
+    )
+    for name in ("process_sql_file", "process_yaml_file", "SqlLanceChunk", "YamlLanceChunk"):
+        assert not hasattr(flow, name), f"{name} is still defined in the flow module"
+
+    common = importlib.import_module(
+        "java_codebase_rag.index.java_index_v1_common"
+    )
+    assert not hasattr(common, "SQL_CHUNK"), "SQL_CHUNK is still defined"
+    assert not hasattr(common, "YAML_CHUNK"), "YAML_CHUNK is still defined"

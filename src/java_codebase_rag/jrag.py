@@ -1211,11 +1211,11 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- Search command (PR-JRAG-4) ----
     search = subparsers.add_parser(
         "search",
-        help="Semantic search over Lance tables.",
+        help="Semantic search over the indexed JVM sources.",
         parents=[_common_parser()],
         description=(
-            "Semantic search via search_v2 over the Lance index (java/sql/yaml tables). "
-            "--table all searches all three. --hybrid enables vector+keyword hybrid. "
+            "Semantic search via search_v2 over the Lance index (JVM source chunks). "
+            "--hybrid enables vector+keyword hybrid. "
             "--offset paginates. --path-contains narrows by file path substring. "
             "Filters (NodeFilter flags) narrow results.\n\n"
             "--fuzzy is accepted as a no-op (search is inherently semantic; "
@@ -1224,12 +1224,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     search.add_argument("query", help="Natural-language search query.")
-    search.add_argument(
-        "--table",
-        choices=("java", "sql", "yaml", "all"),
-        default="java",
-        help="Lance table to search (default: java; all = java+sql+yaml).",
-    )
     search.add_argument(
         "--hybrid", action="store_true", help="Enable vector+keyword hybrid search."
     )
@@ -4328,7 +4322,6 @@ def _zero_result_guidance(args: argparse.Namespace, graph) -> str | None:
     try:
         probe = mcp_v2.search_v2(
             args.query,
-            table=args.table,
             hybrid=args.hybrid,
             limit=10,
             offset=0,
@@ -4357,7 +4350,7 @@ def _zero_result_guidance(args: argparse.Namespace, graph) -> str | None:
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
-    """search <query> — semantic search via search_v2 over Lance tables.
+    """search <query> — semantic search via search_v2 over the Lance index.
 
     Builds a NodeFilter from flags, calls search_v2 with limit+1 for +1-fetch
     truncation, and renders. --fuzzy is accepted as a silent no-op (search is

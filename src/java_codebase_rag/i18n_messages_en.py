@@ -65,6 +65,54 @@ MESSAGES: dict[str, Any] = {
         "other": "{n} ambiguous matches",
     },
     "MSG_NARROW": "Narrow with --kind --java-kind --role --fqn-contains:",
+    # Error paths in jrag.main() and authored envelope messages (Task 5).
+    "ERR_USAGE_WORD": "usage error",
+    "ERR_INTERNAL": "internal error: {exc}",
+    "LBL_JRAG_ERROR_STDERR": "jrag: error: ",
+    "MSG_INTERRUPTED": "\nInterrupted.\n",
+    "MSG_NO_INDEX": "No index at {path}. Run: jrag init --source-root <root>",
+    "ERR_INDEX_META_FAILED": "Index meta read failed: {error}",
+    "ERR_INVALID_FILTER": "invalid filter: {message}",
+    "ERR_DESCRIBE_FAILED": "describe failed",
+    "ERR_NEIGHBORS_FAILED": "neighbors_v2 failed",
+    "ERR_SEARCH_FAILED": "search failed",
+    "ERR_OUTLINE_FAILED": "outline failed: {exc}",
+    "ERR_READ_FAILED": "could not read {path}: {exc}",
+    "ERR_FILE_NOT_FOUND": (
+        "file not found: '{file}' (looked at the literal path and at "
+        "<source_root>/{file})"
+    ),
+    "ERR_NO_BACKEND": (
+        "no language backend registered for '{file}' "
+        "(suffix '{suffix}' not in registry)"
+    ),
+    "ERR_INVALID_FRAMEWORK": (
+        "invalid framework: '{framework}' (normalized to '{normalized}'); "
+        "expected one of: {valid}"
+    ),
+    "ERR_OVERVIEW_AS_ROUTE": (
+        "overview --as route expects a Route; resolved kind is '{kind}'."
+    ),
+    "MSG_AMBIGUOUS_CANDIDATES": {"one": "{n} candidate", "other": "{n} candidates"},
+    # Auto-scope notices (stderr line + envelope warnings[] value).
+    "MSG_AUTO_SCOPE_STDERR": "[jrag] auto-scope: --service {svc} (cwd)",
+    "WARN_AUTO_SCOPE": (
+        "auto-scope: --service {svc} (inferred from cwd; "
+        "pass --no-auto-scope to disable)"
+    ),
+    # Watch lifecycle lines.
+    "MSG_WATCH_UP": "jrag watch: up (pid {pid}, socket {sock})",
+    "MSG_WATCH_DOWN": "jrag watch: down (no daemon at {sock})",
+    "MSG_WATCH_STOPPED": "jrag watch: stopped (pid {pid})",
+    "MSG_WATCH_DETACHED": "jrag watch: detached (pid {pid}, socket {sock}, log {log})",
+    "MSG_WATCH_CHILD_EXITED": "jrag watch: child exited before serving (see {log})",
+    "MSG_WATCH_START_TIMEOUT": "jrag watch: failed to start within {seconds}s (see {log})",
+    "MSG_WATCH_LAST_REINDEX": "  last reindex: {kind} at {when} (total {count})",
+    "MSG_WATCH_LAST_REINDEX_NONE": "  last reindex: none (total {count})",
+    "LBL_WATCH_MODE": "  mode: {label}",
+    # vocab-index stderr lines.
+    "ERR_VOCAB_STDERR": "[error] {exc}",
+    "ERR_VOCAB_BUILD_FAILED": "[error] Vocabulary index build failed: {exc}",
     # Result-kind nouns (EN values are the identity tokens passed at the seam).
     "LBL_NOUN_MATCHES": "matches",
     "LBL_NOUN_CALLERS": "callers",

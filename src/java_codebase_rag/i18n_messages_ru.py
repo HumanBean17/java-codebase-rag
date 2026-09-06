@@ -71,6 +71,58 @@ MESSAGES: dict[str, Any] = {
         "many": "{n} неоднозначных совпадений",
     },
     "MSG_NARROW": "Уточните через --kind --java-kind --role --fqn-contains:",
+    # Error paths in jrag.main() and authored envelope messages (Task 5).
+    "ERR_USAGE_WORD": "ошибка использования",
+    "ERR_INTERNAL": "внутренняя ошибка: {exc}",
+    "LBL_JRAG_ERROR_STDERR": "jrag: ошибка: ",
+    "MSG_INTERRUPTED": "\nПрервано.\n",
+    "MSG_NO_INDEX": "Нет индекса в {path}. Выполните: jrag init --source-root <root>",
+    "ERR_INDEX_META_FAILED": "не удалось прочитать метаданные индекса: {error}",
+    "ERR_INVALID_FILTER": "недопустимый фильтр: {message}",
+    "ERR_DESCRIBE_FAILED": "сбой describe",
+    "ERR_NEIGHBORS_FAILED": "сбой neighbors_v2",
+    "ERR_SEARCH_FAILED": "сбой поиска",
+    "ERR_OUTLINE_FAILED": "сбой outline: {exc}",
+    "ERR_READ_FAILED": "не удалось прочитать {path}: {exc}",
+    "ERR_FILE_NOT_FOUND": (
+        "файл не найден: '{file}' (проверены путь как есть и "
+        "<source_root>/{file})"
+    ),
+    "ERR_NO_BACKEND": (
+        "языковой backend не зарегистрирован для '{file}' "
+        "(суффикс '{suffix}' отсутствует в реестре)"
+    ),
+    "ERR_INVALID_FRAMEWORK": (
+        "недопустимый framework: '{framework}' (нормализован в '{normalized}'); "
+        "ожидается одно из: {valid}"
+    ),
+    "ERR_OVERVIEW_AS_ROUTE": (
+        "overview --as route ожидает Route; разрешённый kind: '{kind}'."
+    ),
+    "MSG_AMBIGUOUS_CANDIDATES": {
+        "one": "{n} кандидат",
+        "few": "{n} кандидата",
+        "many": "{n} кандидатов",
+    },
+    # Auto-scope notices (stderr line + envelope warnings[] value).
+    "MSG_AUTO_SCOPE_STDERR": "[jrag] auto-scope: --service {svc} (cwd)",
+    "WARN_AUTO_SCOPE": (
+        "auto-scope: --service {svc} (определён по cwd; "
+        "передайте --no-auto-scope, чтобы отключить)"
+    ),
+    # Watch lifecycle lines.
+    "MSG_WATCH_UP": "jrag watch: запущен (pid {pid}, сокет {sock})",
+    "MSG_WATCH_DOWN": "jrag watch: не запущен (демона нет в {sock})",
+    "MSG_WATCH_STOPPED": "jrag watch: остановлен (pid {pid})",
+    "MSG_WATCH_DETACHED": "jrag watch: отсоединён (pid {pid}, сокет {sock}, лог {log})",
+    "MSG_WATCH_CHILD_EXITED": "jrag watch: дочерний процесс завершился до готовности (см. {log})",
+    "MSG_WATCH_START_TIMEOUT": "jrag watch: не удалось запустить за {seconds}s (см. {log})",
+    "MSG_WATCH_LAST_REINDEX": "  последняя переиндексация: {kind} в {when} (всего {count})",
+    "MSG_WATCH_LAST_REINDEX_NONE": "  последняя переиндексация: нет (всего {count})",
+    "LBL_WATCH_MODE": "  режим: {label}",
+    # vocab-index stderr lines.
+    "ERR_VOCAB_STDERR": "[ошибка] {exc}",
+    "ERR_VOCAB_BUILD_FAILED": "[ошибка] Не удалось построить индекс словаря: {exc}",
     # Result-kind nouns.
     "LBL_NOUN_MATCHES": "совпадения",
     "LBL_NOUN_CALLERS": "вызывающие стороны",

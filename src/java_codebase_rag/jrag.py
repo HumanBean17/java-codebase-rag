@@ -33,6 +33,7 @@ from pathlib import Path
 from java_codebase_rag._fdlimit import raise_fd_limit
 from java_codebase_rag._stdio import force_utf8_stdio
 from java_codebase_rag._version import version_string
+from java_codebase_rag.i18n import tr
 
 __all__ = ["build_parser", "main", "_console_script_main"]
 
@@ -149,7 +150,7 @@ def _apply_auto_scope(args: argparse.Namespace, cfg, graph) -> None:
         return
     args.service = candidate
     args._service_auto = candidate
-    print(f"[jrag] auto-scope: --service {candidate} (cwd)", file=sys.stderr)
+    print(tr("MSG_AUTO_SCOPE_STDERR", svc=candidate), file=sys.stderr)
 
 
 def _auto_scope_notice(args: argparse.Namespace) -> list[str]:
@@ -162,10 +163,7 @@ def _auto_scope_notice(args: argparse.Namespace) -> list[str]:
     svc = getattr(args, "_service_auto", None)
     if not svc:
         return []
-    return [
-        f"auto-scope: --service {svc} (inferred from cwd; "
-        f"pass --no-auto-scope to disable)"
-    ]
+    return [tr("WARN_AUTO_SCOPE", svc=svc)]
 
 
 def _load_graph_or_error(args: argparse.Namespace):
@@ -1415,10 +1413,7 @@ def _load_graph(cfg):  # type: ignore[no-untyped-def]
 
     ladybug_path = str(cfg.ladybug_path)
     if not LadybugGraph.exists(ladybug_path):
-        raise _IndexNotFound(
-            f"No index at {cfg.ladybug_path}. "
-            "Run: jrag init --source-root <root>"
-        )
+        raise _IndexNotFound(tr("MSG_NO_INDEX", path=cfg.ladybug_path))
     try:
         return LadybugGraph.get(ladybug_path)
     except RuntimeError as exc:
@@ -1434,14 +1429,14 @@ def _cmd_vocab_index(args: argparse.Namespace) -> int:
     try:
         graph = _load_graph(cfg)
     except (_IndexNotFound, _IndexStale) as exc:
-        print(f"[error] {exc}", file=sys.stderr)
+        print(tr("ERR_VOCAB_STDERR", exc=exc), file=sys.stderr)
         return 2
 
     # Build vocabulary index
     try:
         index = VocabularyIndex.build(graph, q=cfg.absence_ngram_q)
     except Exception as e:
-        print(f"[error] Vocabulary index build failed: {e}", file=sys.stderr)
+        print(tr("ERR_VOCAB_BUILD_FAILED", exc=e), file=sys.stderr)
         return 1
 
     # Save to sidecar
@@ -1513,24 +1508,24 @@ def _cmd_watch_status(cfg) -> int:
     pid = ProjectLock.read_holder(cfg.index_dir)
     state = _read_state_file(cfg.index_dir)
     if alive:
-        print(f"jrag watch: up (pid {pid}, socket {sock})")
+        print(tr("MSG_WATCH_UP", pid=pid, sock=sock))
         if state:
             if state.get("mode") == "lexical":
                 # Two-variant label shared with the TTY panel: stack absent
                 # (graph-only install) vs retrieval=bm25 on a capable platform.
                 # Imported from the light pipeline module — this probe verb must
                 # not pull the heavy daemon module.
-                print(f"  mode: {lexical_mode_label()}")
+                print(tr("LBL_WATCH_MODE", label=lexical_mode_label()))
             kind = state.get("last_reindex_kind")
             at = state.get("last_reindex_at")
             count = state.get("reindex_count", 0)
             if kind and at:
                 when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
-                print(f"  last reindex: {kind} at {when} (total {count})")
+                print(tr("MSG_WATCH_LAST_REINDEX", kind=kind, when=when, count=count))
             else:
-                print(f"  last reindex: none (total {count})")
+                print(tr("MSG_WATCH_LAST_REINDEX_NONE", count=count))
         return 0
-    print(f"jrag watch: down (no daemon at {sock})")
+    print(tr("MSG_WATCH_DOWN", sock=sock))
     return 1
 
 
@@ -1567,7 +1562,7 @@ def _cmd_watch_stop(cfg) -> int:
         _watch_signal(pid, signal.SIGKILL)
     _watch_unlink(sock)
     _watch_unlink(state_path)
-    print(f"jrag watch: stopped (pid {pid})")
+    print(tr("MSG_WATCH_STOPPED", pid=pid))
     return 0
 
 
@@ -1620,19 +1615,22 @@ def _cmd_watch_detach(args: argparse.Namespace, cfg) -> int:
     if is_daemon_alive(cfg.index_dir):
         pid = ProjectLock.read_holder(cfg.index_dir)
         print(
-            f"jrag watch: detached (pid {pid}, socket "
-            f"{paths.socket_path(cfg.index_dir)}, log {log_path})"
+            tr(
+                "MSG_WATCH_DETACHED",
+                pid=pid,
+                sock=paths.socket_path(cfg.index_dir),
+                log=log_path,
+            )
         )
         return 0
     if child_exited:
         print(
-            f"jrag watch: child exited before serving (see {log_path})",
+            tr("MSG_WATCH_CHILD_EXITED", log=log_path),
             file=sys.stderr,
         )
     else:
         print(
-            f"jrag watch: failed to start within {_WATCH_DETACH_TIMEOUT_S}s "
-            f"(see {log_path})",
+            tr("MSG_WATCH_START_TIMEOUT", seconds=_WATCH_DETACH_TIMEOUT_S, log=log_path),
             file=sys.stderr,
         )
     return 2
@@ -1748,7 +1746,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if "error" in meta:
         env = Envelope(
             status="error",
-            message=f"Index meta read failed: {meta['error']}",
+            message=tr("ERR_INDEX_META_FAILED", error=meta['error']),
         )
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
@@ -2101,7 +2099,7 @@ def _build_node_filter_or_error(filter_dict: dict):
             msg = str(err.get("msg") or "").strip()
             parts.append(f"{loc}: {msg}" if loc else msg)
         message = "; ".join(parts) if parts else str(exc)
-        return None, Envelope(status="error", message=f"invalid filter: {message}")
+        return None, Envelope(status="error", message=tr("ERR_INVALID_FILTER", message=message))
 
 
 def _render_find_filter(args: argparse.Namespace, payload) -> int:
@@ -2175,7 +2173,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     desc_out = payload["describe"]
 
     if not desc_out.success or desc_out.record is None:
-        env = Envelope(status="error", message=desc_out.message or "describe failed")
+        env = Envelope(status="error", message=desc_out.message or tr("ERR_DESCRIBE_FAILED"))
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
 
@@ -3110,7 +3108,7 @@ def _cmd_overrides(args: argparse.Namespace) -> int:
         limit=limit + 1, graph=graph,
     )
     if not out.success:
-        print(render(Envelope(status="error", message=out.message or "neighbors_v2 failed"), fmt=args.format, detail=args.detail))
+        print(render(Envelope(status="error", message=out.message or tr("ERR_NEIGHBORS_FAILED")), fmt=args.format, detail=args.detail))
         return 2
 
     nodes: dict[str, dict] = {root_id: _noderef_to_node_dict(node)}
@@ -3163,7 +3161,7 @@ def _cmd_overridden_by(args: argparse.Namespace) -> int:
         limit=limit + 1, graph=graph,
     )
     if not out.success:
-        print(render(Envelope(status="error", message=out.message or "neighbors_v2 failed"), fmt=args.format, detail=args.detail))
+        print(render(Envelope(status="error", message=out.message or tr("ERR_NEIGHBORS_FAILED")), fmt=args.format, detail=args.detail))
         return 2
 
     nodes: dict[str, dict] = {root_id: _noderef_to_node_dict(node)}
@@ -3409,7 +3407,7 @@ def _cmd_dependencies(args: argparse.Namespace) -> int:
         limit=limit + 1, graph=graph,
     )
     if not out.success:
-        print(render(Envelope(status="error", message=out.message or "neighbors_v2 failed"), fmt=args.format, detail=args.detail))
+        print(render(Envelope(status="error", message=out.message or tr("ERR_NEIGHBORS_FAILED")), fmt=args.format, detail=args.detail))
         return 2
 
     nodes: dict[str, dict] = {root_id: _noderef_to_node_dict(node)}
@@ -3720,9 +3718,9 @@ def _cmd_outline(args: argparse.Namespace) -> int:
     if file_path is None:
         env = Envelope(
             status="error",
-            message=(
-                f"file not found: {args.file!r} (looked at the literal path and at "
-                f"<source_root>/{args.file})"
+            message=tr(
+                "ERR_FILE_NOT_FOUND",
+                file=args.file,
             ),
         )
         print(render(env, fmt=args.format, detail=args.detail))
@@ -3744,7 +3742,7 @@ def _cmd_outline(args: argparse.Namespace) -> int:
             end_line=2**31 - 1,
         )
     except Exception as exc:
-        env = Envelope(status="error", message=f"outline failed: {exc}")
+        env = Envelope(status="error", message=tr("ERR_OUTLINE_FAILED", exc=exc))
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
 
@@ -3786,9 +3784,9 @@ def _cmd_imports(args: argparse.Namespace) -> int:
     if file_path is None:
         env = Envelope(
             status="error",
-            message=(
-                f"file not found: {args.file!r} (looked at the literal path and at "
-                f"<source_root>/{args.file})"
+            message=tr(
+                "ERR_FILE_NOT_FOUND",
+                file=args.file,
             ),
         )
         print(render(env, fmt=args.format, detail=args.detail))
@@ -3797,7 +3795,7 @@ def _cmd_imports(args: argparse.Namespace) -> int:
     try:
         src = file_path.read_bytes()
     except OSError as exc:
-        env = Envelope(status="error", message=f"could not read {file_path}: {exc}")
+        env = Envelope(status="error", message=tr("ERR_READ_FAILED", path=file_path, exc=exc))
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
 
@@ -3813,9 +3811,10 @@ def _cmd_imports(args: argparse.Namespace) -> int:
     if backend is None:
         env = Envelope(
             status="error",
-            message=(
-                f"no language backend registered for {args.file!r} "
-                f"(suffix {Path(args.file).suffix!r} not in registry)"
+            message=tr(
+                "ERR_NO_BACKEND",
+                file=args.file,
+                suffix=Path(args.file).suffix,
             ),
         )
         print(render(env, fmt=args.format, detail=args.detail))
@@ -4162,7 +4161,7 @@ def _overview_route(args: argparse.Namespace, cfg, graph, route_path: str) -> in
     if node.kind != "route":
         env = Envelope(
             status="error",
-            message=f"overview --as route expects a Route; resolved kind is {node.kind!r}.",
+            message=tr("ERR_OVERVIEW_AS_ROUTE", kind=node.kind),
         )
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
@@ -4453,9 +4452,11 @@ def _cmd_search(args: argparse.Namespace) -> int:
         valid = ", ".join(sorted(_FRAMEWORK_ANNOTATIONS))
         env = Envelope(
             status="error",
-            message=(
-                f"invalid framework: {args.framework!r} (normalized to {framework_want!r}); "
-                f"expected one of: {valid}"
+            message=tr(
+                "ERR_INVALID_FRAMEWORK",
+                framework=args.framework,
+                normalized=framework_want,
+                valid=valid,
             ),
         )
         print(render(env, fmt=args.format, detail=args.detail))
@@ -4477,7 +4478,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
         return pe.rc
 
     if not out.success:
-        env = Envelope(status="error", message=out.message or "search failed")
+        env = Envelope(status="error", message=out.message or tr("ERR_SEARCH_FAILED"))
         print(render(env, fmt=args.format, detail=args.detail))
         return 2
 
@@ -4654,12 +4655,12 @@ def main(argv: list[str] | None = None) -> int:
         # values already consumed by the pre-parser), so we don't mis-prefix
         # with a value like ``json`` from ``--format json``.
         cmd = next((t for t in leftover if not t.startswith("-")), None)
-        msg = str(exc).strip() or "usage error"
+        msg = str(exc).strip() or tr("ERR_USAGE_WORD")
         if cmd and not msg.startswith(cmd):
             msg = f"{cmd}: {msg}"
         env = Envelope(status="error", message=msg)
         print(render(env, fmt=fmt, detail=detail))
-        print(f"jrag: error: {msg}", file=sys.stderr)
+        print(f"{tr('LBL_JRAG_ERROR_STDERR')}{msg}", file=sys.stderr)
         return 2
     handler = getattr(args, "handler", None)
     if handler is None:
@@ -4674,7 +4675,7 @@ def main(argv: list[str] | None = None) -> int:
 
         env = Envelope(
             status="error",
-            message=f"internal error: {exc}",
+            message=tr("ERR_INTERNAL", exc=exc),
         )
         print(render(env, fmt=getattr(args, "format", "text")))
         print(traceback.format_exc(), file=sys.stderr)
@@ -4700,7 +4701,7 @@ def _console_script_main() -> None:
     try:
         rc = main()
     except KeyboardInterrupt:
-        sys.stderr.write("\nInterrupted.\n")
+        sys.stderr.write(tr("MSG_INTERRUPTED"))
         sys.stderr.flush()
         rc = 130
     sys.stdout.flush()

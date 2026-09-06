@@ -92,3 +92,78 @@ def test_dispatch_stash_feeds_help_locale(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "Язык интерфейса" in out
+
+
+# ----- Task 5: agent-verb runtime strings and error paths --------------------
+
+
+def test_error_envelope_russian_usage_error(capsys, tmp_path, monkeypatch):
+    """Usage-error stderr prefix localizes; the envelope keeps the stdlib's
+    English message text (documented out-of-scope: argparse fragments)."""
+    monkeypatch.chdir(tmp_path)
+    i18n.set_cli_lang_override("ru")
+
+    rc = jrag.main(["callers"])
+
+    assert rc == 2
+    res = capsys.readouterr()
+    assert res.err.startswith("jrag: ошибка:")
+    assert "callers" in res.out  # cmd prefix on the envelope message stays literal
+
+
+def test_error_envelope_russian_internal_error(capsys, tmp_path, monkeypatch):
+    def _boom(args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(jrag, "_cmd_status", _boom)
+
+    rc = jrag.main(["status", "--lang", "ru", "--index-dir", str(tmp_path)])
+
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "внутренняя ошибка: boom" in out
+    assert "internal error" not in out
+
+
+def test_missing_index_russian_message(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    empty = tmp_path / "no-index"
+    empty.mkdir()
+
+    rc = jrag.main(["status", "--lang", "ru", "--index-dir", str(empty)])
+
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "Нет индекса" in out
+    assert "jrag init --source-root" in out  # remediation keeps its literal command
+
+
+def test_ambiguous_plural_russian():
+    from java_codebase_rag.i18n import ntr
+
+    i18n.set_locale("ru")
+    try:
+        assert ntr("MSG_AMBIGUOUS_CANDIDATES", 3) == "3 кандидата"
+        assert ntr("MSG_AMBIGUOUS_CANDIDATES", 5) == "5 кандидатов"
+        assert ntr("MSG_AMBIGUOUS_CANDIDATES", 1) == "1 кандидат"
+    finally:
+        i18n.reset_locale()
+    assert ntr("MSG_AMBIGUOUS_CANDIDATES", 1) == "1 candidate"
+    assert ntr("MSG_AMBIGUOUS_CANDIDATES", 5) == "5 candidates"
+
+
+def test_auto_scope_warning_russian(capsys):
+    """The envelope warning value localizes (stderr line + warnings[] value)."""
+    from java_codebase_rag.jrag import _auto_scope_notice
+    import argparse as _ap
+
+    args = _ap.Namespace(_service_auto="chat-core")
+    i18n.set_locale("ru")
+    try:
+        notices = _auto_scope_notice(args)
+    finally:
+        i18n.reset_locale()
+    assert notices == [
+        "auto-scope: --service chat-core (определён по cwd; "
+        "передайте --no-auto-scope, чтобы отключить)"
+    ]

@@ -79,7 +79,7 @@ and service boundaries — structure you'd otherwise grep for. You are the explo
 - `map` — Symbol counts per kind, grouped by service or module.
 - `conventions` — Dominant roles + framework tallies.
 - `overview` — Bundle for a microservice, route, or topic.
-- `search` — Semantic search over the Lance vector index.
+- `search` — Semantic search over the indexed JVM sources.
 - `vocab-index` — Rebuild the vocabulary index (absence diagnosis).
 - `watch` — keep the index fresh and serve warm queries while running
 

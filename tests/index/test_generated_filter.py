@@ -169,7 +169,6 @@ def test_run_search_exclude_generated_removes_generated_sources(lancedb_with_gen
     rows = search_lancedb.run_search(
         "HandWritten OR Model",  # Query that matches both files
         uri=lancedb_with_generated_index,
-        table_keys=["java"],
         limit=10,
         path_substring=None,  # No path filter
         model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -198,7 +197,6 @@ def test_run_search_generated_only_returns_only_generated_sources(lancedb_with_g
     rows = search_lancedb.run_search(
         "HandWritten OR Model",  # Query that matches both files
         uri=lancedb_with_generated_index,
-        table_keys=["java"],
         limit=10,
         path_substring=None,
         model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -227,7 +225,6 @@ def test_run_search_default_returns_both_types(lancedb_with_generated_index) -> 
     rows = search_lancedb.run_search(
         "HandWritten OR Model",  # Query that matches both files
         uri=lancedb_with_generated_index,
-        table_keys=["java"],
         limit=10,
         path_substring=None,
         model_name="sentence-transformers/all-MiniLM-L6-v2",

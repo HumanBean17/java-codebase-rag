@@ -9,10 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 MESSAGES: dict[str, Any] = {
-    # Bootstrap keys (removed in the operator-CLI task once real keys land).
-    "MSG_TEST_GREETING": "index ready",
-    "MSG_TEST_PLURAL": {"one": "{n} match", "other": "{n} matches"},
-    "LBL_TEST_PREFIX": "Verdict: ",
     # Unified dispatcher help section header (byte-exact pre-i18n string).
     "MSG_UNIFIED_OPERATOR_HEADER": (
         "Operator commands (indexing & maintenance; run `jrag <command> --help` "
@@ -113,6 +109,77 @@ MESSAGES: dict[str, Any] = {
     # vocab-index stderr lines.
     "ERR_VOCAB_STDERR": "[error] {exc}",
     "ERR_VOCAB_BUILD_FAILED": "[error] Vocabulary index build failed: {exc}",
+    # Operator CLI: lazy advisory twins of the frozen module constants (the
+    # constants stay English forever — MCP consumes them directly; spec D2/D4).
+    "MSG_INCREMENT_WARNING": (
+        "WARNING: AST graph (LadybugDB) incremental rebuild is not yet implemented.\n"
+        "The graph reflects the index state from the last `init` or `reprocess`,\n"
+        "which means `find`, `neighbors`, and `describe` may return stale results\n"
+        "for files changed since then.\n"
+        "\n"
+        "Lance vector index has been updated incrementally and is current.\n"
+        "\n"
+        "For an up-to-date graph, run:\n"
+        "    jrag reprocess\n"
+        "\n"
+        "Track progress on LadybugDB incremental rebuild:\n"
+        "    {url}"
+    ),
+    "MSG_REFRESH_DEPRECATION": (
+        "WARN: 'refresh' is deprecated; use 'reprocess'. "
+        "This alias will be removed in the next release."
+    ),
+    "MSG_REPROCESS_DRIFT_VECTORS_ONLY": (
+        "jrag reprocess: rebuilt vectors only; graph (code_graph.lbug) was NOT rebuilt "
+        "and may now reflect a stale source snapshot."
+    ),
+    "MSG_REPROCESS_DRIFT_GRAPH_ONLY": (
+        "jrag reprocess: rebuilt graph only; vectors (Lance tables under "
+        "{index_dir}) were NOT rebuilt and may now reflect a stale source snapshot."
+    ),
+    "MSG_VECTORS_SKIPPED_GRAPH_ONLY": (
+        "jrag: vectors skipped — vector stack not installed on this platform "
+        "(graph-only mode). The graph is built/refreshed; semantic search is unavailable."
+    ),
+    "MSG_VECTORS_SKIPPED_BM25": (
+        "jrag: vectors skipped — retrieval mode is bm25; building graph only."
+    ),
+    "MSG_RETRIEVAL_BM25_HINT": (
+        "Tip: can't download the embedding model? Switch to keyword search: "
+        "jrag install --retrieval bm25 (or set JAVA_CODEBASE_RAG_RETRIEVAL=bm25) "
+        "— indexing and search then work fully offline."
+    ),
+    "MSG_DEPRECATION_NOTICE": (
+        "jrag: 'java-codebase-rag' is now 'jrag'; this alias continues to work. "
+        "Set JRAG_NO_DEPRECATION=1 to silence.\n"
+    ),
+    # Operator erase flow.
+    "MSG_ERASE_WILL_DELETE": "Will delete:",
+    "MSG_ERASE_NOTHING": "  (nothing to delete under resolved index dir)",
+    "MSG_ERASE_CONFIRM": "Delete these paths? [y/N]: ",
+    "MSG_ERASE_NON_INTERACTIVE": (
+        "jrag erase: non-interactive stdin; pass --yes to confirm."
+    ),
+    "MSG_ERASE_ABORTED": "Aborted.",
+    "MSG_ERASE_COCO_MISSING": (
+        "jrag erase: cocoindex CLI not found next to this Python; "
+        "skipped `cocoindex drop` — cocoindex.db (if any) was not removed by CocoIndex."
+    ),
+    "MSG_ERASE_DROPPED": "jrag: erase: dropped Lance tables: {tables}",
+    "MSG_WARN_RM_FAILED": "warning: failed to remove {path}: {exc}",
+    # Reprocess selective-mode TTY lines.
+    "MSG_REBUILT_VECTORS": "Rebuilt: vectors",
+    "MSG_SKIPPED_GRAPH": (
+        "Skipped: graph (use `jrag reprocess --graph-only` or `reprocess` to refresh)"
+    ),
+    "MSG_REBUILT_GRAPH": "Rebuilt: graph",
+    "MSG_REPROCESS_COMPLETED_VECTORS": "reprocess completed (vectors only; graph not rebuilt)",
+    "MSG_REPROCESS_COMPLETED_GRAPH": "reprocess completed (graph only; vectors not rebuilt)",
+    "MSG_REPROCESS_COMPLETED": "reprocess completed",
+    "MSG_REPROCESS_COMPLETED_BM25": "reprocess completed (graph-only; vectors skipped — retrieval mode is bm25)",
+    "MSG_SKIPPED_VECTORS": (
+        "Skipped: vectors (use `jrag reprocess --vectors-only` or `reprocess` to refresh)"
+    ),
     # Result-kind nouns (EN values are the identity tokens passed at the seam).
     "LBL_NOUN_MATCHES": "matches",
     "LBL_NOUN_CALLERS": "callers",

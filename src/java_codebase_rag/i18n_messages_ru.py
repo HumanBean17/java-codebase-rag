@@ -10,14 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 MESSAGES: dict[str, Any] = {
-    # Bootstrap keys (removed in the operator-CLI task once real keys land).
-    "MSG_TEST_GREETING": "индекс готов",
-    "MSG_TEST_PLURAL": {
-        "one": "{n} совпадение",
-        "few": "{n} совпадения",
-        "many": "{n} совпадений",
-    },
-    "LBL_TEST_PREFIX": "Вердикт: ",
     # Unified dispatcher help section header.
     "MSG_UNIFIED_OPERATOR_HEADER": (
         "Команды оператора (индексация и обслуживание; подробности — "
@@ -123,6 +115,78 @@ MESSAGES: dict[str, Any] = {
     # vocab-index stderr lines.
     "ERR_VOCAB_STDERR": "[ошибка] {exc}",
     "ERR_VOCAB_BUILD_FAILED": "[ошибка] Не удалось построить индекс словаря: {exc}",
+    # Operator CLI: lazy advisory twins of the frozen module constants.
+    "MSG_INCREMENT_WARNING": (
+        "ВНИМАНИЕ: инкрементальная пересборка AST-графа (LadybugDB) пока не реализована.\n"
+        "Граф отражает состояние индекса на момент последнего `init` или `reprocess`,\n"
+        "поэтому `find`, `neighbors` и `describe` могут возвращать устаревшие результаты\n"
+        "для файлов, изменённых с того момента.\n"
+        "\n"
+        "Векторный индекс Lance обновлён инкрементально и актуален.\n"
+        "\n"
+        "Чтобы получить актуальный граф, выполните:\n"
+        "    jrag reprocess\n"
+        "\n"
+        "Прогресс инкрементальной пересборки LadybugDB:\n"
+        "    {url}"
+    ),
+    "MSG_REFRESH_DEPRECATION": (
+        "ВНИМАНИЕ: команда 'refresh' устарела; используйте 'reprocess'. "
+        "Псевдоним будет удалён в следующем релизе."
+    ),
+    "MSG_REPROCESS_DRIFT_VECTORS_ONLY": (
+        "jrag reprocess: пересобраны только векторы; граф (code_graph.lbug) НЕ пересобран "
+        "и может отражать устаревший снимок исходников."
+    ),
+    "MSG_REPROCESS_DRIFT_GRAPH_ONLY": (
+        "jrag reprocess: пересобран только граф; векторы (таблицы Lance в "
+        "{index_dir}) НЕ пересобраны и могут отражать устаревший снимок исходников."
+    ),
+    "MSG_VECTORS_SKIPPED_GRAPH_ONLY": (
+        "jrag: векторы пропущены — векторный стек не установлен на этой платформе "
+        "(режим graph-only). Граф построен/обновлён; семантический поиск недоступен."
+    ),
+    "MSG_VECTORS_SKIPPED_BM25": (
+        "jrag: векторы пропущены — режим retrieval bm25; строится только граф."
+    ),
+    "MSG_RETRIEVAL_BM25_HINT": (
+        "Подсказка: не удаётся скачать модель эмбеддингов? Переключитесь на поиск "
+        "по ключевым словам: jrag install --retrieval bm25 (или задайте "
+        "JAVA_CODEBASE_RAG_RETRIEVAL=bm25) — индексация и поиск полностью работают офлайн."
+    ),
+    "MSG_DEPRECATION_NOTICE": (
+        "jrag: 'java-codebase-rag' теперь 'jrag'; псевдоним продолжает работать. "
+        "Установите JRAG_NO_DEPRECATION=1, чтобы скрыть уведомление.\n"
+    ),
+    # Operator erase flow.
+    "MSG_ERASE_WILL_DELETE": "Будет удалено:",
+    "MSG_ERASE_NOTHING": "  (под каталогом индекса нечего удалять)",
+    "MSG_ERASE_CONFIRM": "Удалить эти пути? [y/N]: ",
+    "MSG_ERASE_NON_INTERACTIVE": (
+        "jrag erase: неинтерактивный stdin; передайте --yes для подтверждения."
+    ),
+    "MSG_ERASE_ABORTED": "Отменено.",
+    "MSG_ERASE_COCO_MISSING": (
+        "jrag erase: CLI cocoindex не найден рядом с этим Python; "
+        "`cocoindex drop` пропущен — cocoindex.db (если был) не удалён CocoIndex."
+    ),
+    "MSG_ERASE_DROPPED": "jrag: erase: удалены таблицы Lance: {tables}",
+    "MSG_WARN_RM_FAILED": "предупреждение: не удалось удалить {path}: {exc}",
+    # Reprocess selective-mode TTY lines.
+    "MSG_REBUILT_VECTORS": "Пересобрано: векторы",
+    "MSG_SKIPPED_GRAPH": (
+        "Пропущено: граф (используйте `jrag reprocess --graph-only` или `reprocess` "
+        "для обновления)"
+    ),
+    "MSG_REBUILT_GRAPH": "Пересобрано: граф",
+    "MSG_REPROCESS_COMPLETED_VECTORS": "reprocess завершён (только векторы; граф не пересобран)",
+    "MSG_REPROCESS_COMPLETED_GRAPH": "reprocess завершён (только граф; векторы не пересобраны)",
+    "MSG_REPROCESS_COMPLETED": "reprocess завершён",
+    "MSG_REPROCESS_COMPLETED_BM25": "reprocess завершён (graph-only; векторы пропущены — режим retrieval bm25)",
+    "MSG_SKIPPED_VECTORS": (
+        "Пропущено: векторы (используйте `jrag reprocess --vectors-only` или "
+        "`reprocess` для обновления)"
+    ),
     # Result-kind nouns.
     "LBL_NOUN_MATCHES": "совпадения",
     "LBL_NOUN_CALLERS": "вызывающие стороны",

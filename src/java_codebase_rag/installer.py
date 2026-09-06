@@ -1222,6 +1222,8 @@ def run_init_if_needed(
     from java_codebase_rag.pipeline import (
         RETRIEVAL_BM25_HINT,
         VECTORS_SKIPPED_BM25,
+        retrieval_bm25_hint,
+        vectors_skipped_bm25,
         is_cocoindex_preflight_blocker,
         run_build_ast_graph,
         run_cocoindex_update,
@@ -1265,7 +1267,7 @@ def run_init_if_needed(
         vectors_skipped = bm25_mode
         coco_failed = False
         if bm25_mode:
-            print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
+            print(vectors_skipped_bm25(), file=sys.stderr, flush=True)
         else:
             coco = run_cocoindex_update(
                 env,
@@ -1288,7 +1290,7 @@ def run_init_if_needed(
                 # Remediation hint (suppressed when the mode is already bm25 —
                 # the guard is unreachable here today, kept honest on purpose).
                 if retrieval_mode_from_env() != "bm25":
-                    print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                    print(retrieval_bm25_hint(), file=sys.stderr, flush=True)
             elif vectors_skipped:
                 print(
                     "jrag: vectors skipped — vector stack not installed on this "
@@ -2069,6 +2071,8 @@ def run_update(
     from java_codebase_rag.pipeline import (
         RETRIEVAL_BM25_HINT,
         VECTORS_SKIPPED_BM25,
+        retrieval_bm25_hint,
+        vectors_skipped_bm25,
         is_cocoindex_preflight_blocker,
         run_cocoindex_update,
         run_incremental_graph,
@@ -2135,7 +2139,7 @@ def run_update(
             vectors_skipped = bm25_mode
             coco_failed = False
             if bm25_mode:
-                print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
+                print(vectors_skipped_bm25(), file=sys.stderr, flush=True)
             else:
                 coco = run_cocoindex_update(
                     env,
@@ -2155,7 +2159,7 @@ def run_update(
                         file=sys.stderr,
                     )
                     if retrieval_mode_from_env() != "bm25":
-                        print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                        print(retrieval_bm25_hint(), file=sys.stderr, flush=True)
                 elif vectors_skipped:
                     print(
                         "jrag: vectors skipped — vector stack not installed on this "

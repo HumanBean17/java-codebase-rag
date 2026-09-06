@@ -31,6 +31,9 @@ from java_codebase_rag.pipeline import (
     RETRIEVAL_BM25_HINT as _RETRIEVAL_BM25_HINT,
     VECTORS_SKIPPED_BM25 as _VECTORS_SKIPPED_BM25,
     VECTORS_SKIPPED_GRAPH_ONLY as _VECTORS_SKIPPED_GRAPH_ONLY,
+    retrieval_bm25_hint as _pipeline_retrieval_bm25_hint,
+    vectors_skipped_bm25 as _vectors_skipped_bm25,
+    vectors_skipped_graph_only as _vectors_skipped_graph_only,
     clip,
     is_cocoindex_preflight_blocker,
     is_graph_preflight_blocker,
@@ -69,11 +72,33 @@ _REPROCESS_DRIFT_VECTORS_ONLY = (
 )
 
 
+# Localized lazy twins of the frozen module constants above (the constants
+# stay English for any consumer that pins them; runtime CLI paths localize).
+# Same pattern as pipeline.vectors_skipped_* — see the note there.
+def _increment_warning_lines() -> list[str]:
+    from java_codebase_rag.i18n import tr
+
+    return tr(
+        "MSG_INCREMENT_WARNING", url=LADYBUG_INCREMENTAL_TRACKING_ISSUE_URL
+    ).split("\n")
+
+
+def _refresh_deprecation() -> str:
+    from java_codebase_rag.i18n import tr
+
+    return tr("MSG_REFRESH_DEPRECATION")
+
+
+def _reprocess_drift_vectors_only() -> str:
+    from java_codebase_rag.i18n import tr
+
+    return tr("MSG_REPROCESS_DRIFT_VECTORS_ONLY")
+
+
 def _reprocess_drift_graph_only_line(index_dir: Path) -> str:
-    return (
-        "jrag reprocess: rebuilt graph only; vectors (Lance tables under "
-        f"{index_dir}) were NOT rebuilt and may now reflect a stale source snapshot."
-    )
+    from java_codebase_rag.i18n import tr
+
+    return tr("MSG_REPROCESS_DRIFT_GRAPH_ONLY", index_dir=index_dir)
 
 
 def _reprocess_exit_code(payload: dict[str, Any]) -> int:
@@ -99,12 +124,14 @@ def _is_graph_preflight_blocker(g: Any) -> bool:
 
 
 def _emit_reprocess_selective_tty(*, mode: str) -> None:
+    from java_codebase_rag.i18n import tr
+
     if mode == "vectors":
-        print("Rebuilt: vectors")
-        print("Skipped: graph (use `jrag reprocess --graph-only` or `reprocess` to refresh)")
+        print(tr("MSG_REBUILT_VECTORS"))
+        print(tr("MSG_SKIPPED_GRAPH"))
     else:
-        print("Rebuilt: graph")
-        print("Skipped: vectors (use `jrag reprocess --vectors-only` or `reprocess` to refresh)")
+        print(tr("MSG_REBUILT_GRAPH"))
+        print(tr("MSG_SKIPPED_VECTORS"))
 
 
 def _reprocess_success_message(mode: str | None, payload: dict[str, Any]) -> str:
@@ -118,11 +145,13 @@ def _reprocess_success_message(mode: str | None, payload: dict[str, Any]) -> str
     explicit = payload.get("message")
     if isinstance(explicit, str) and explicit:
         return explicit
+    from java_codebase_rag.i18n import tr
+
     if mode == "vectors":
-        return "reprocess completed (vectors only; graph not rebuilt)"
+        return tr("MSG_REPROCESS_COMPLETED_VECTORS")
     if mode == "graph":
-        return "reprocess completed (graph only; vectors not rebuilt)"
-    return "reprocess completed"
+        return tr("MSG_REPROCESS_COMPLETED_GRAPH")
+    return tr("MSG_REPROCESS_COMPLETED")
 
 
 def _emit_reprocess_outcome(payload: dict[str, Any], *, selective_tty_mode: str | None = None) -> None:
@@ -285,7 +314,7 @@ def _emit(value: Any) -> None:
 
 
 def _emit_increment_ladybug_warning() -> None:
-    for line in _INCREMENT_WARNING_LINES:
+    for line in _increment_warning_lines():
         print(line, file=sys.stderr)
 
 
@@ -405,7 +434,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             # bm25 retrieval: there are no vectors to build, so cocoindex is never
             # spawned. Same operator-facing skip line and graph-only proceed as the
             # stack-absent branch below.
-            print(_VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
+            print(_vectors_skipped_bm25(), file=sys.stderr, flush=True)
         else:
             coco = run_cocoindex_update(
                 env,
@@ -433,10 +462,10 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 # Remediation hint (suppressed when the mode is already bm25 —
                 # the guard is unreachable here today, kept honest on purpose).
                 if retrieval_mode_from_env() != "bm25":
-                    print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                    print(_pipeline_retrieval_bm25_hint(), file=sys.stderr, flush=True)
                 return 1
             if vectors_skipped:
-                print(_VECTORS_SKIPPED_GRAPH_ONLY, file=sys.stderr, flush=True)
+                print(_vectors_skipped_graph_only(), file=sys.stderr, flush=True)
         if not args.quiet:
             print(file=sys.stderr, flush=True)
         g = run_build_ast_graph(
@@ -492,7 +521,7 @@ def _cmd_increment(args: argparse.Namespace) -> int:
         if bm25_mode:
             # bm25 retrieval: there are no vectors to build, so cocoindex is never
             # spawned. Same operator-facing skip line as the stack-absent branch below.
-            print(_VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
+            print(_vectors_skipped_bm25(), file=sys.stderr, flush=True)
         else:
             coco = run_cocoindex_update(
                 env,
@@ -515,10 +544,10 @@ def _cmd_increment(args: argparse.Namespace) -> int:
                     }
                 )
                 if retrieval_mode_from_env() != "bm25":
-                    print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                    print(_pipeline_retrieval_bm25_hint(), file=sys.stderr, flush=True)
                 return 1
             if vectors_skipped:
-                print(_VECTORS_SKIPPED_GRAPH_ONLY, file=sys.stderr, flush=True)
+                print(_vectors_skipped_graph_only(), file=sys.stderr, flush=True)
 
         # If --vectors-only is set, skip graph update
         if vectors_only:
@@ -656,10 +685,10 @@ def _cmd_reprocess(args: argparse.Namespace) -> int:
                 "phases_run": ["vectors"],
             }
             if ok:
-                print(_REPROCESS_DRIFT_VECTORS_ONLY, file=sys.stderr)
+                print(_reprocess_drift_vectors_only(), file=sys.stderr)
             _emit_reprocess_outcome(payload, selective_tty_mode="vectors" if ok else None)
             if not ok and retrieval_mode_from_env() != "bm25":
-                print(_RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                print(_pipeline_retrieval_bm25_hint(), file=sys.stderr, flush=True)
             return _reprocess_exit_code(payload)
 
         if graph_only or bm25_mode:
@@ -668,7 +697,7 @@ def _cmd_reprocess(args: argparse.Namespace) -> int:
             # says so with the bm25 skip line instead of the stale-vectors drift
             # note, which does not apply when no vectors exist.
             if bm25_mode:
-                print(_VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
+                print(_vectors_skipped_bm25(), file=sys.stderr, flush=True)
             g = run_build_ast_graph(
                 source_root=cfg.source_root,
                 ladybug_path=cfg.ladybug_path,
@@ -699,7 +728,7 @@ def _cmd_reprocess(args: argparse.Namespace) -> int:
                 "stdout": "",
                 "stderr": "",
                 "message": (
-                    "reprocess completed (graph-only; vectors skipped — retrieval mode is bm25)"
+                    tr("MSG_REPROCESS_COMPLETED_BM25")
                     if ok and bm25_mode
                     else None if ok
                     else f"graph builder exit {g.returncode}"
@@ -781,7 +810,9 @@ def _rm_any(path: Path) -> None:
         elif path.exists() or path.is_symlink():
             path.unlink(missing_ok=True)
     except OSError as exc:
-        print(f"warning: failed to remove {path}: {exc}", file=sys.stderr)
+        from java_codebase_rag.i18n import tr
+
+        print(tr("MSG_WARN_RM_FAILED", path=path, exc=exc), file=sys.stderr)
 
 
 def _cmd_erase(args: argparse.Namespace) -> int:
@@ -811,40 +842,34 @@ def _cmd_erase(args: argparse.Namespace) -> int:
         except Exception:
             pass
     rows = describe_path_sizes(to_describe)
-    summary_lines = [f"  {p}: {sz} bytes" for p, sz in rows] or ["  (nothing to delete under resolved index dir)"]
-    print("Will delete:", file=sys.stderr)
+    from java_codebase_rag.i18n import tr
+
+    summary_lines = (
+        [f"  {p}: {sz} bytes" for p, sz in rows] or [tr("MSG_ERASE_NOTHING")]
+    )
+    print(tr("MSG_ERASE_WILL_DELETE"), file=sys.stderr)
     print("\n".join(summary_lines), file=sys.stderr)
     if not args.yes:
         if not sys.stdin.isatty():
-            print(
-                "jrag erase: non-interactive stdin; pass --yes to confirm.",
-                file=sys.stderr,
-            )
+            print(tr("MSG_ERASE_NON_INTERACTIVE"), file=sys.stderr)
             return 2
         try:
-            ans = input("Delete these paths? [y/N]: ").strip().lower()
+            ans = input(tr("MSG_ERASE_CONFIRM")).strip().lower()
         except EOFError:
             # Non-interactive stdin that nonetheless reported isatty() == True
             # (the Windows NUL device is a character device, so isatty() lies).
             # Treat it as a refusal instead of crashing with an EOF traceback.
-            print(
-                "jrag erase: non-interactive stdin; pass --yes to confirm.",
-                file=sys.stderr,
-            )
+            print(tr("MSG_ERASE_NON_INTERACTIVE"), file=sys.stderr)
             return 2
         if ans not in ("y", "yes"):
-            print("Aborted.", file=sys.stderr)
+            print(tr("MSG_ERASE_ABORTED"), file=sys.stderr)
             return 2
 
     def work(progress: "PipelineProgress | None") -> int:
         env = cfg.subprocess_env()
         drop = run_cocoindex_drop(env, quiet=bool(args.quiet))
         if drop.returncode == 127:
-            print(
-                "jrag erase: cocoindex CLI not found next to this Python; "
-                "skipped `cocoindex drop` — cocoindex.db (if any) was not removed by CocoIndex.",
-                file=sys.stderr,
-            )
+            print(tr("MSG_ERASE_COCO_MISSING"), file=sys.stderr)
         elif drop.returncode != 0:
             print(clip(drop.stderr, 4000), file=sys.stderr)
         # Remove the LadybugDB graph, the cocoindex state store, and every
@@ -873,8 +898,10 @@ def _cmd_erase(args: argparse.Namespace) -> int:
 
                 dropped = drop_all_tables_by_scan(cfg.index_dir.resolve())
                 if dropped and not bool(args.quiet):
+                    from java_codebase_rag.i18n import tr as _tr
+
                     print(
-                        f"jrag: erase: dropped Lance tables: {', '.join(dropped)}",
+                        _tr("MSG_ERASE_DROPPED", tables=", ".join(dropped)),
                         file=sys.stderr,
                     )
             except Exception:
@@ -1278,15 +1305,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raise_fd_limit()
     raw = list(argv if argv is not None else sys.argv[1:])
-    if raw and raw[0] == "refresh":
-        print(_REFRESH_DEPRECATION, file=sys.stderr)
-        raw[0] = "reprocess"
     from java_codebase_rag.i18n import cli_lang_override, init_help_locale, scan_lang
 
-    # Locale must be known before build_parser(): argparse help strings are
-    # baked at construction. scan_lang catches the after-verb flag form; the
-    # stash carries the dispatch pre-scan's before-verb value (console path).
+    # Locale must be known before the refresh-deprecation print AND before
+    # build_parser() (argparse help strings are baked at construction).
+    # scan_lang catches the after-verb flag form; the stash carries the
+    # dispatch pre-scan's before-verb value (console path).
     init_help_locale(scan_lang(raw) or cli_lang_override())
+    if raw and raw[0] == "refresh":
+        print(_refresh_deprecation(), file=sys.stderr)
+        raw[0] = "reprocess"
     parser = build_parser()
     try:
         args = parser.parse_args(raw)
@@ -1295,7 +1323,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return int(e.code) if isinstance(e.code, int) else 2
     except argparse.ArgumentError as exc:
-        print(f"jrag: {exc}", file=sys.stderr)
+        from java_codebase_rag.i18n import tr
+
+        print(f"{tr('LBL_JRAG_ERROR_STDERR')}{exc}", file=sys.stderr)
         return 2
     handler = getattr(args, "handler", None)
     if handler is None:
@@ -1304,7 +1334,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except Exception as exc:  # pragma: no cover - defensive top-level guard
-        _emit({"success": False, "exit_code": 2, "message": f"internal error: {exc}"})
+        from java_codebase_rag.i18n import tr
+
+        _emit({"success": False, "exit_code": 2, "message": tr("ERR_INTERNAL", exc=exc)})
         return 2
 
 
@@ -1328,7 +1360,9 @@ def _console_script_main() -> None:
     try:
         rc = main()
     except KeyboardInterrupt:
-        sys.stderr.write("\nInterrupted.\n")
+        from java_codebase_rag.i18n import tr
+
+        sys.stderr.write(tr("MSG_INTERRUPTED"))
         sys.stderr.flush()
         rc = 130
     sys.stdout.flush()

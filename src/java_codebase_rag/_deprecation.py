@@ -34,6 +34,13 @@ _DEPRECATION_LINE = (
     "Set JRAG_NO_DEPRECATION=1 to silence.\n"
 )
 
+
+def _deprecation_notice() -> str:
+    """Localized notice (lazy: module-level constants freeze at import)."""
+    from java_codebase_rag.i18n import tr
+
+    return tr("MSG_DEPRECATION_NOTICE")
+
 #: Executable suffixes appended by Windows (and packaging tools like pip) to
 #: console-script wrappers. All three are exactly 4 characters long (``.exe``,
 #: ``.bat``, ``.cmd``) so a single ``b[:-4]`` slice strips any of them. Stripping
@@ -98,6 +105,6 @@ def maybe_warn_legacy_alias(stream=None) -> None:
         return
     target = stream if stream is not None else sys.stderr
     try:
-        target.write(_DEPRECATION_LINE)
+        target.write(_deprecation_notice())
     except Exception:  # pragma: no cover - defensive: never break startup
         return

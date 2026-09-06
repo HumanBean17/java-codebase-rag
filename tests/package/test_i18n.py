@@ -48,9 +48,9 @@ def test_set_locale_valid_and_invalid():
 
 
 def test_tr_english_and_russian():
-    assert i18n.tr("MSG_TEST_GREETING") == "index ready"
+    assert i18n.tr("MSG_ERASE_ABORTED") == "Aborted."
     i18n.set_locale("ru")
-    assert i18n.tr("MSG_TEST_GREETING") == "индекс готов"
+    assert i18n.tr("MSG_ERASE_ABORTED") == "Отменено."
 
 
 def test_tr_placeholder_formatting(monkeypatch):
@@ -74,22 +74,22 @@ def test_tr_missing_placeholder_propagates(monkeypatch):
 
 
 def test_ntr_english_plurals():
-    assert i18n.ntr("MSG_TEST_PLURAL", 1) == "1 match"
-    assert i18n.ntr("MSG_TEST_PLURAL", 0) == "0 matches"
-    assert i18n.ntr("MSG_TEST_PLURAL", 5) == "5 matches"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 1) == "1 candidate"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 0) == "0 candidates"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 5) == "5 candidates"
 
 
 def test_ntr_russian_plurals():
     i18n.set_locale("ru")
-    assert i18n.ntr("MSG_TEST_PLURAL", 1) == "1 совпадение"
-    assert i18n.ntr("MSG_TEST_PLURAL", 2) == "2 совпадения"
-    assert i18n.ntr("MSG_TEST_PLURAL", 5) == "5 совпадений"
-    assert i18n.ntr("MSG_TEST_PLURAL", 11) == "11 совпадений"
-    assert i18n.ntr("MSG_TEST_PLURAL", 21) == "21 совпадение"
-    assert i18n.ntr("MSG_TEST_PLURAL", 22) == "22 совпадения"
-    assert i18n.ntr("MSG_TEST_PLURAL", 101) == "101 совпадение"
-    assert i18n.ntr("MSG_TEST_PLURAL", 111) == "111 совпадений"
-    assert i18n.ntr("MSG_TEST_PLURAL", 0) == "0 совпадений"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 1) == "1 кандидат"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 2) == "2 кандидата"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 5) == "5 кандидатов"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 11) == "11 кандидатов"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 21) == "21 кандидат"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 22) == "22 кандидата"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 101) == "101 кандидат"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 111) == "111 кандидатов"
+    assert i18n.ntr("MSG_AMBIGUOUS_CANDIDATES", 0) == "0 кандидатов"
 
 
 def test_plural_form_table():

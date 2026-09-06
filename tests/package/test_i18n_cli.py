@@ -167,3 +167,108 @@ def test_auto_scope_warning_russian(capsys):
         "auto-scope: --service chat-core (определён по cwd; "
         "передайте --no-auto-scope, чтобы отключить)"
     ]
+
+
+# ----- Task 6: operator CLI strings ------------------------------------------
+
+
+def test_cli_arg_error_stdlib_fragment_stays_english(capsys, tmp_path, monkeypatch):
+    """Operator usage errors route through stock argparse ``error()`` (usage
+    dump + ``<prog>: error:``), a stdlib fragment that stays English by spec.
+    The jrag-authored ``LBL_JRAG_ERROR_STDERR`` wrapper localizes the paths
+    that reach it; this pins the boundary."""
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["erase", "--lang", "ru", "--bogus"])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "error: unrecognized arguments: --bogus" in err
+
+
+def test_cli_internal_error_russian(capsys, tmp_path, monkeypatch):
+    import json as _json
+
+    def _boom(ns):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "_cmd_tables", _boom)
+    monkeypatch.chdir(tmp_path)
+
+    rc = cli.main(["tables", "--lang", "ru", "--index-dir", str(tmp_path)])
+
+    assert rc == 2
+    out = capsys.readouterr().out
+    payload = _json.loads(out)
+    assert set(payload) == {"success", "exit_code", "message"}  # keys stay English
+    assert "внутренняя ошибка: boom" in payload["message"]
+
+
+def test_refresh_deprecation_russian(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def _stub_reprocess(ns):
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_reprocess", _stub_reprocess)
+    rc = cli.main(["refresh", "--lang", "ru"])
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "устарела" in err
+    assert "reprocess" in err
+
+
+def test_erase_prompt_russian(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    monkeypatch.chdir(tmp_path)
+    empty_idx = tmp_path / ".java-codebase-rag"
+    empty_idx.mkdir()
+
+    rc = cli.main(["erase", "--lang", "ru", "--index-dir", str(tmp_path)])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Будет удалено" in err
+    assert "Отменено" in err
+
+
+def test_increment_warning_lazy_russian():
+    from java_codebase_rag.cli import _INCREMENT_WARNING_LINES
+
+    i18n.set_locale("ru")
+    try:
+        ru = cli._increment_warning_lines()
+        assert any("ВНИМАНИЕ" in line for line in ru)
+        assert any("jrag reprocess" in line for line in ru)  # literal command survives
+    finally:
+        i18n.reset_locale()
+    # EN parity: the lazy function reproduces the frozen constant exactly.
+    assert cli._increment_warning_lines() == list(_INCREMENT_WARNING_LINES)
+
+
+def test_advisory_functions_english_parity():
+    """EN output of the localized advisory functions equals the frozen module
+    constants (drift guard); MCP paths keep consuming the constants directly."""
+    from java_codebase_rag import pipeline
+    from java_codebase_rag.cli import (
+        _REFRESH_DEPRECATION,
+        _REPROCESS_DRIFT_VECTORS_ONLY,
+    )
+
+    assert pipeline.vectors_skipped_graph_only() == pipeline.VECTORS_SKIPPED_GRAPH_ONLY
+    assert pipeline.vectors_skipped_bm25() == pipeline.VECTORS_SKIPPED_BM25
+    assert pipeline.retrieval_bm25_hint() == pipeline.RETRIEVAL_BM25_HINT
+    assert cli._refresh_deprecation() == _REFRESH_DEPRECATION
+    assert cli._reprocess_drift_vectors_only() == _REPROCESS_DRIFT_VECTORS_ONLY
+
+
+def test_advisory_functions_russian():
+    from java_codebase_rag import pipeline
+
+    i18n.set_locale("ru")
+    try:
+        assert "векторы пропущены" in pipeline.vectors_skipped_bm25()
+        assert "bm25" in pipeline.retrieval_bm25_hint()
+    finally:
+        i18n.reset_locale()

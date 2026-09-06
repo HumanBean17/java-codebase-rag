@@ -197,6 +197,19 @@ def run_cocoindex_update(
     on_progress: Callable[[ProgressEvent], None] | None = None,
     on_progress_console: object | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    # One-time migration: index dirs built by versions that indexed SQL/YAML
+    # carry two orphaned Lance table dirs; drop them so the table set and disk
+    # stay honest (see LEGACY_LANCE_TABLE_NAMES). Cheap no-op when absent, and
+    # a cleanup failure never blocks the update itself.
+    try:
+        from java_codebase_rag.lance_optimize import drop_legacy_tables
+
+        idx_raw = env.get("JAVA_CODEBASE_RAG_INDEX_DIR", "").strip()
+        # Mirrors the flow's own fallback (child cwd = the flow dir).
+        idx_dir = Path(idx_raw).expanduser() if idx_raw else _FLOW_DIR / ".java-codebase-rag"
+        drop_legacy_tables(idx_dir)
+    except Exception as exc:
+        print(f"jrag: legacy-table cleanup skipped: {exc}", file=sys.stderr)
     if full_reprocess:
         # A full reprocess rebuilds every row, so DROP the Lance target tables
         # first and let cocoindex recreate them via the fast INSERT path. The

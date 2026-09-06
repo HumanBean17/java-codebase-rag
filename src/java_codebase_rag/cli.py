@@ -778,14 +778,17 @@ def _cmd_erase(args: argparse.Namespace) -> int:
             _rm_any(operator_path)
         if cfg.index_dir.is_dir():
             try:
-                import lancedb
+                # Scan-based: drops every *.lance dir, including tables the
+                # store cannot list (e.g. a corrupt manifest) and the legacy
+                # SQL/YAML dirs from pre-removal indexes.
+                from java_codebase_rag.lance_optimize import drop_all_tables_by_scan
 
-                db = lancedb.connect(str(cfg.index_dir.resolve()))
-                for name in list(db.list_tables()):
-                    try:
-                        db.drop_table(name)
-                    except Exception as exc:
-                        print(f"warning: failed to drop Lance table {name!r}: {exc}", file=sys.stderr)
+                dropped = drop_all_tables_by_scan(cfg.index_dir.resolve())
+                if dropped and not bool(args.quiet):
+                    print(
+                        f"jrag: erase: dropped Lance tables: {', '.join(dropped)}",
+                        file=sys.stderr,
+                    )
             except Exception:
                 pass
         _emit({"success": True, "message": "erase completed"})

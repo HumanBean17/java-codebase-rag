@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from java_codebase_rag.index.java_index_flow_lancedb import (
+import pytest
+
+# The flow module imports cocoindex at module top; graph-only installs (Intel
+# Mac CI) don't have it — skip collection there like the sibling vector tests.
+pytest.importorskip("cocoindex")
+
+from java_codebase_rag.index.java_index_flow_lancedb import (  # noqa: E402
     _approximate_vectors_total,
 )
 

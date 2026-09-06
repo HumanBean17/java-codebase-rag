@@ -561,7 +561,6 @@ def search_payload(args: argparse.Namespace, cfg, graph):
     limit = min(args.limit if args.limit is not None else 20, 499)
     return mcp_v2.search_v2(
         args.query,
-        table=args.table,
         hybrid=args.hybrid,
         limit=limit + 1,  # +1 for truncated detection
         offset=args.offset,

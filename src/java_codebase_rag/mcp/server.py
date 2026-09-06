@@ -649,7 +649,7 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(
         name="search",
         description=(
-            "Ranked chunk retrieval over content tables (java/sql/yaml); `query` is opaque text (natural language or code "
+            "Ranked chunk retrieval over the indexed JVM sources; `query` is opaque text (natural language or code "
             "fragments) and results are score-ranked, not boolean-matched. For graph-structured listing "
             "(symbols/routes/clients/producers) use `find`, not `search`. Optional `filter` uses the same NodeFilter "
             "schema as `find` but only **symbol-applicable** fields apply — others return success=false. Substring "
@@ -663,13 +663,9 @@ def create_mcp_server() -> FastMCP:
     )
     async def search(
         query: str = Field(description="Search query"),
-        table: Literal["java", "sql", "yaml", "all"] = Field(
-            default="java",
-            description="Which content table to search. 'all' fuses java/sql/yaml results.",
-        ),
         hybrid: bool = Field(
             default=False,
-            description="If true, fuse FTS + vector. Requires a single table (java/sql/yaml); hybrid with table='all' returns success=false.",
+            description="If true, fuse FTS + vector ranking.",
         ),
         limit: int = Field(default=5, ge=1, le=50, description="Max hits to return"),
         offset: int = Field(default=0, ge=0, le=500, description="Skip this many hits (pagination)"),
@@ -697,7 +693,6 @@ def create_mcp_server() -> FastMCP:
         return await asyncio.to_thread(
             mcp_v2.search_v2,
             query,
-            table,
             hybrid,
             limit,
             offset,

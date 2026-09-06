@@ -921,7 +921,6 @@ def _node_matches_filter(
 
 def search_v2(
     query: str,
-    table: str = "java",
     hybrid: bool = False,
     limit: int = 5,
     offset: int = 0,
@@ -978,10 +977,6 @@ def search_v2(
                 "lexical (graph-only) mode — keyword ranking only; "
                 "semantic/vector search requires Apple Silicon, Linux, or Windows"
             )
-            if table in ("sql", "yaml", "all"):
-                advisories.append(
-                    "sql/yaml tables are not indexed in graph-only mode; only Java symbols were searched"
-                )
             if hybrid:
                 advisories.append("hybrid is ignored in graph-only lexical mode")
             rows = run_lexical_search(
@@ -996,17 +991,6 @@ def search_v2(
                 graph=graph,
             )
         else:
-            # hybrid + table='all' is unsupported (hybrid fuses vector+FTS on ONE
-            # table); fail fast with a clean envelope BEFORE loading the embedding
-            # model. run_search also guards this — this is the user-facing fast path.
-            if hybrid and table == "all":
-                return SearchOutput(
-                    success=False,
-                    message="hybrid search requires a single table; use java, sql, or yaml (not all)",
-                    advisories=[],
-                    limit=None,
-                    offset=None,
-                )
             model_name = resolved_sbert_model_for_process_env(SBERT_MODEL)
             device = os.environ.get("SBERT_DEVICE") or None
             model = _get_sentence_transformer(model_name, device)
@@ -1078,8 +1062,8 @@ def search_v2(
                         graph_expand=True,  # 3-list fusion survives the FTS fallback
                     )
                     advisories.append(
-                        f"hybrid unavailable on table '{table}' (FTS index missing on this index built before "
-                        f"PR-SEARCH-3); fell back to vector-only — reindex to enable hybrid"
+                        "hybrid unavailable (FTS index missing on this index built before "
+                        "PR-SEARCH-3); fell back to vector-only — reindex to enable hybrid"
                     )
                 else:
                     # Non-FTS error: surface as structured failure

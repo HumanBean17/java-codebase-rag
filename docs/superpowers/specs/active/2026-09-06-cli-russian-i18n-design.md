@@ -1,7 +1,7 @@
 # CLI Russian localization (i18n)
 
 - **Date:** 2026-09-06
-- **Status:** draft
+- **Status:** in_progress
 
 ## Motivation
 

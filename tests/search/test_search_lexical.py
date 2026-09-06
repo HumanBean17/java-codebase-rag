@@ -151,12 +151,6 @@ def test_explain_components_populated(tmp_path: Path) -> None:
     assert "relevance=" not in explain_score_components(comps, lexical=False)
 
 
-def test_table_sql_and_yaml_return_empty(tmp_path: Path) -> None:
-    g = _graph(_build_corpus(tmp_path))
-    assert run_lexical_search("anything", table="sql", graph=g) == []
-    assert run_lexical_search("anything", table="yaml", graph=g) == []
-
-
 def test_no_graph_raises_clean_error(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("JAVA_CODEBASE_RAG_INDEX_DIR", str(tmp_path / "no_such_idx"))
     with pytest.raises(RuntimeError, match="lexical search unavailable"):

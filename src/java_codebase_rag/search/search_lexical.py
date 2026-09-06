@@ -268,7 +268,6 @@ fetch_fts_candidates = _try_fts_candidates
 def run_lexical_search(
     query: str,
     *,
-    table: str = "java",
     limit: int = 5,
     offset: int = 0,
     path_contains: str | None = None,
@@ -290,13 +289,8 @@ def run_lexical_search(
 
     Raises ``RuntimeError`` (message contains "lexical search unavailable") if no
     symbol graph exists — the caller maps that to a clean failure envelope. Returns
-    ``[]`` for ``table in ("sql", "yaml")`` (those LanceDB tables aren't built in
-    graph-only mode) and when the graph exists but nothing matches.
+    ``[]`` when the graph exists but nothing matches.
     """
-    # sql/yaml LanceDB tables don't exist in graph-only mode.
-    if table in ("sql", "yaml"):
-        return []
-
     if graph is None and not LadybugGraph.exists():
         raise RuntimeError(
             "lexical search unavailable: no symbol graph found; "

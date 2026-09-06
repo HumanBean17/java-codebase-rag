@@ -181,7 +181,6 @@ def test_search_one_table_selects_symbol_identity_columns_when_schema_has_them(m
         query_vec=np.zeros((3,), dtype=np.float32),
         limit=5,
         path_predicate=None,
-        kind="java",
         hybrid=False,
         fts_text=None,
         extra_predicates=None,
@@ -524,69 +523,20 @@ def test_run_search_dedup_offset_pagination() -> None:
     assert has_truncation, "Should detect truncation when +1 row exists"
 
 
-def test_run_search_dedup_passes_through_sql_yaml() -> None:
-    """Rows without primary_type_fqn (sql/yaml) are NOT collapsed.
+def test_run_search_has_no_table_keys_param() -> None:
+    """Single-table contract: run_search takes no table selector.
 
-    Each row without primary_type_fqn gets a unique dedup key __id:<id>
-    so they pass through unchanged.
+    Passing ``table_keys`` must be a loud TypeError, not a silently ignored
+    leftover (the sql/yaml tables are gone by design).
     """
-    from java_codebase_rag.search.search_lancedb import _dedup_by_fqn
+    import inspect
 
-    rows = [
-        {
-            "filename": "schema.sql",
-            "range_start": 1,
-            "range_end": 10,
-            "primary_type_fqn": None,  # SQL row
-            "_score": 0.90,
-            "id": "sql1",
-        },
-        {
-            "filename": "schema.sql",
-            "range_start": 11,
-            "range_end": 20,
-            "primary_type_fqn": None,  # SQL row
-            "_score": 0.85,
-            "id": "sql2",
-        },
-        {
-            "filename": "config.yaml",
-            "range_start": 1,
-            "range_end": 10,
-            "primary_type_fqn": None,  # YAML row
-            "_score": 0.88,
-            "id": "yaml1",
-        },
-        {
-            "filename": "a.java",
-            "range_start": 1,
-            "range_end": 10,
-            "primary_type_fqn": "com.example.TypeA",  # Java row
-            "_score": 0.95,
-        },
-        {
-            "filename": "a.java",
-            "range_start": 11,
-            "range_end": 20,
-            "primary_type_fqn": "com.example.TypeA",  # Java row - should collapse
-            "_score": 0.85,
-        },
-    ]
+    from java_codebase_rag.search.search_lancedb import run_search
 
-    deduped = _dedup_by_fqn(rows)
-
-    # Should have 4 rows: 3 sql/yaml (unique) + 1 java (collapsed from 2)
-    assert len(deduped) == 4, f"expected 4 rows, got {len(deduped)}"
-
-    # Check sql/yaml rows are all present (not collapsed)
-    sql_yaml_rows = [r for r in deduped if r["primary_type_fqn"] is None]
-    assert len(sql_yaml_rows) == 3, f"expected 3 sql/yaml rows, got {len(sql_yaml_rows)}"
-
-    # Check java row is collapsed to 1
-    java_rows = [r for r in deduped if r["primary_type_fqn"] == "com.example.TypeA"]
-    assert len(java_rows) == 1, "Java rows should be collapsed to 1"
-    assert java_rows[0]["_chunks_collapsed"] == 2, "Should have 2 chunks collapsed"
-    assert java_rows[0]["_score"] == 0.95, "Best chunk should survive"
+    params = inspect.signature(run_search).parameters
+    assert "table_keys" not in params
+    with pytest.raises(TypeError):
+        run_search("q", uri="unused", table_keys=["java"])
 
 
 def test_run_search_dedup_off_is_byte_identical() -> None:
@@ -708,12 +658,10 @@ def test_refine_java_start_lines_points_at_declaration() -> None:
     assert rows[0]["start"]["line"] == 4  # decl line, not the package anchor
 
 
-def test_refine_java_start_lines_skips_nonjava_and_method_chunks() -> None:
+def test_refine_java_start_lines_skips_method_chunks_and_missing_start() -> None:
     from java_codebase_rag.search.search_lancedb import _refine_java_start_lines
 
     rows = [
-        # Non-java row untouched.
-        {"_kind": "sql", "start": {"line": 7}, "text": "SELECT 1", "_hints": {}},
         # Java method-only chunk (no type decl) keeps its anchor.
         {"_kind": "java", "start": {"line": 30}, "text": "    void doWork() {}\n",
          "_hints": {"primary_type_hint": "Worker"}},
@@ -721,9 +669,8 @@ def test_refine_java_start_lines_skips_nonjava_and_method_chunks() -> None:
         {"_kind": "java", "text": "public class X {", "_hints": {}},
     ]
     _refine_java_start_lines(rows)
-    assert rows[0]["start"]["line"] == 7
-    assert rows[1]["start"]["line"] == 30
-    assert "start" not in rows[2]
+    assert rows[0]["start"]["line"] == 30
+    assert "start" not in rows[1]
 
 
 # ---------- Task 4: BM25 candidate fetch + third RRF list ----------
@@ -1177,7 +1124,7 @@ def test_run_search_bm25_degrades_silently_when_fts_missing(monkeypatch, tmp_pat
     db.create_table(TABLES["java"], [row], mode="create")
 
     common = dict(
-        uri=uri, table_keys=["java"], limit=5, path_substring=None,
+        uri=uri, limit=5, path_substring=None,
         model_name=SBERT_MODEL, device="cpu", model=model,
         graph_expand=True, expand_depth=1,
     )
@@ -1359,7 +1306,7 @@ def test_run_search_bm25_contributes_on_camelcase_query_via_real_fts(tmp_path) -
     db.create_table(TABLES["java"], [row], mode="create")
 
     common = dict(
-        uri=uri, table_keys=["java"], limit=5, path_substring=None,
+        uri=uri, limit=5, path_substring=None,
         model_name=SBERT_MODEL, device="cpu", model=model,
         graph_expand=True, expand_depth=1, ladybug_path=str(ladybug_path),
     )

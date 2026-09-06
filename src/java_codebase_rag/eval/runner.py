@@ -297,7 +297,6 @@ def _eval_one_config(
         rows = run_search(
             q.query,
             uri=uri,
-            table_keys=["java"],
             limit=limit,
             offset=0,
             path_substring=None,

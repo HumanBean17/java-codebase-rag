@@ -162,25 +162,23 @@ def test_search_path_contains_filter(monkeypatch, ladybug_graph) -> None:
 
 @needs_vectors
 def test_search_v2_enables_graph_expand_on_java(monkeypatch, ladybug_graph) -> None:
-    """search_v2 must pass graph_expand=True on the java table so the always-on
-    3-list RRF fusion (vector + graph + BM25; design spec, issue #431) actually
-    runs on the user-facing path. This is the wiring contract that let PR #443
-    ship dormant: search_v2 never asked for graph_expand, so _graph_expand_merge
+    """search_v2 must pass graph_expand=True so the always-on 3-list RRF fusion
+    (vector + graph + BM25; design spec, issue #431) actually runs on the
+    user-facing path. This is the wiring contract that let PR #443 ship
+    dormant: search_v2 never asked for graph_expand, so _graph_expand_merge
     (and its BM25 third list) never executed for `jrag search` / MCP `search`."""
     seen: dict[str, Any] = {}
 
     def fake_run_search(query, **kwargs):
         seen["graph_expand"] = kwargs.get("graph_expand")
-        seen["table_keys"] = kwargs.get("table_keys")
         return _fake_search_rows()
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("ChatService", table="java", graph=ladybug_graph)
+    out = search_v2("ChatService", graph=ladybug_graph)
 
     assert out.success is True
-    assert seen.get("table_keys") == ["java"]
     assert seen.get("graph_expand") is True, (
-        "search_v2 must enable graph_expand on the java table; without it the "
+        "search_v2 must enable graph_expand; without it the "
         "vector+graph+BM25 fusion is dormant (the PR #443 wiring bug)"
     )
 
@@ -776,7 +774,7 @@ def test_search_hybrid_missing_fts_falls_back_to_vector(monkeypatch, ladybug_gra
         return _fake_search_rows()
 
     monkeypatch.setattr("java_codebase_rag.mcp.mcp_v2.run_search", fake_run_search)
-    out = search_v2("server port", table="yaml", hybrid=True, graph=ladybug_graph)
+    out = search_v2("server port", hybrid=True, graph=ladybug_graph)
 
     # Should succeed with vector-only fallback
     assert out.success is True

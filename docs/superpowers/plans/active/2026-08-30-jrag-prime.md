@@ -2,6 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-execution pivot (2026-09-06, maintainer decision).** All 11 tasks were
+> executed and reviewed, but the Phase-A gate FAILED (spec Rollout), so the
+> maintainer descoped before merge: Tasks 7–9's artifact removal and Task 3/4's
+> installer hook wiring were reverted; the branch now ships the additive parts
+> only — `jrag prime` (Tasks 1–2, manual SessionStart wiring documented in
+> JRAG-CLI.md) and the bench wiring (Task 5 + slice filters). Skill/agent
+> artifacts and the installer ship unchanged from 0.12.x. The per-task text
+> below is the executed original, kept as the record.
+
 **Goal:** Replace the four shipped skill/agent artifacts with `jrag prime` (a SessionStart-injected, navigation-framed orientation payload embedding the real `--help` surface), validated in the bench (#464 slice) before the breaking removal ships.
 
 **Architecture:** Phase A adds the read-only `prime` subcommand (metadata-only state reads, direct markdown print, `--hook-json` envelope) and rewires bench condition D's tools section to runtime-generated prime output, then runs the gated slice. Phase B rewires the installer's CLI surface to write a SessionStart hook instead of deploying files, adds legacy-artifact cleanup to `update`, deletes the artifacts, and updates docs. Both phases land in one PR; the 0.13.0 tag waits for the gate.

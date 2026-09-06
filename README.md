@@ -39,7 +39,7 @@ The rest of this README is the install, the tool/command orientation, and the re
 pip install jrag-cli
 ```
 
-Python **3.11+** required, on **Linux, macOS, and Windows**. On Linux, Windows, and **Apple Silicon** Macs every native dependency (LanceDB, LadybugDB, CocoIndex) ships a wheel and you get the full semantic + graph search. **Intel Macs (x86_64) install graph-only**: PyTorch ≥2.3 and LanceDB ≥0.26 dropped macOS Intel wheels, so the vector stack is auto-excluded via PEP 508 markers — `pip install jrag-cli` works out of the box, the graph layer (`find` / `describe` / `neighbors` / `resolve`) is fully usable, and the `search` tool falls back to **lexical search** over the symbol graph — BM25-ranked over a LadybugDB full-text index (same tool contract, keyword-ranked instead of semantic; an advisory notes the mode). Semantic/vector search needs Apple Silicon, Linux, or Windows. After install, `jrag --help` should print the CLI groups.
+Python **3.11+** required, on **Linux, macOS, and Windows**. On Linux, Windows, and **Apple Silicon** Macs every native dependency (LanceDB, LadybugDB, CocoIndex) ships a wheel and you get the full semantic + graph search. **Intel Macs (x86_64) install graph-only**: PyTorch ≥2.3 and LanceDB ≥0.26 dropped macOS Intel wheels, so the vector stack is auto-excluded via PEP 508 markers — `pip install jrag-cli` works out of the box, the graph layer (`find` / `describe` / `neighbors` / `resolve`) is fully usable, and the `search` tool falls back to **lexical search** over the symbol graph — BM25-ranked over a LadybugDB full-text index (same tool contract, keyword-ranked instead of semantic; an advisory notes the mode). Semantic/vector search needs Apple Silicon, Linux, or Windows. On **any** platform you can instead choose keyword search at install time — `jrag install --retrieval bm25` (or the wizard's retrieval-mode question) — which skips the embedding model entirely: no model download, fully offline, same `search` tool contract via BM25 keyword ranking. `--retrieval` is honored only where the vector stack is installed; Intel Mac remains graph-only by packaging, and the installer records `bm25` there regardless of the flag. After install, `jrag --help` should print the CLI groups.
 The package includes the CocoIndex lifecycle dependency used by `init`, `increment`, `reprocess`, and `erase` on platforms that have it (it is absent on Intel Mac).
 
 **Kotlin (`.kt`) is indexed alongside Java (`.java`)** — both feed one merged AST graph (a Kotlin class can implement a Java interface and vice versa). Kotlin parsing requires the `tree-sitter-kotlin` grammar; if it fails to import, `.kt` files are skipped and Java-only indexing proceeds. **Intel Mac note:** `tree-sitter-kotlin` currently ships a macOS x86_64 wheel, so Kotlin indexing works there today; if a future release drops that wheel, Kotlin indexing degrades off on Intel Mac while the Java graph keeps working. See `docs/CODEBASE_REQUIREMENTS.md` A.1 for the v1 Kotlin limitations (extension-function calls unresolved; non-Spring frameworks out of scope; generated-code classification Java-only).
@@ -49,7 +49,7 @@ The package includes the CocoIndex lifecycle dependency used by `init`, `increme
 Run `jrag install` from your Java project root to launch an interactive setup wizard that:
 
 1. Detects Java source directories (Maven/Gradle modules)
-2. Configures the embedding model (auto-downloads ~90MB or uses a local path)
+2. Picks retrieval mode — `vectors` (semantic, recommended) or `bm25` (keyword, offline) — and, for `vectors`, configures the embedding model (auto-downloads ~90MB or uses a local path)
 3. Selects agent hosts (Claude Code, Qwen Code, GigaCode)
 4. Wires the agent surface — a `jrag prime` SessionStart hook (`cli`, the default) or an MCP registration (`mcp`); no files are deployed
 5. Generates `.java-codebase-rag.yml` configuration
@@ -92,6 +92,7 @@ jrag overview chat-core        # bundle for a microservice
 jrag overview /chat/assign     # route flow (inbound callers + outbound CALLS)
 jrag overview banking.chat     # topic producers + consumers
 jrag overview chat-core --as microservice  # override auto-detection
+jrag prime                     # optional agent orientation payload (see docs/JRAG-CLI.md)
 
 # Locate
 jrag find ChatService          # exact name/FQN lookup (symbols)
@@ -148,7 +149,7 @@ Full schemas, `NodeFilter` / `EdgeFilter` semantics, and the hints contract live
 
 ### Layered architecture
 
-Layer 1 (storage) → Layer 2 (the `jrag` CLI, **or** the legacy 5-tool MCP). Agent orientation needs no shipped skill files: on the CLI surface, `jrag install` wires a **SessionStart hook** that runs `jrag prime --hook-json` at every session start — a compact payload stating what `jrag` is, the trust-the-files rule, live index state, and the command surface embedded from `jrag --help`. On the MCP surface the five tool descriptions self-announce. The full MCP reference for humans is [`docs/AGENT-GUIDE.md`](./docs/AGENT-GUIDE.md).
+Layer 1 (storage) → Layer 2 (the `jrag` CLI, **or** the legacy 5-tool MCP) → Layer 3 (skill). The CLI-surface skill **[`/explore-codebase-cli`](./skills/explore-codebase-cli/SKILL.md)** documents the `jrag` CLI; the MCP-surface skill **[`/explore-codebase`](./skills/explore-codebase/SKILL.md)** documents the legacy 5-tool MCP (PR-JRAG-5). See the [architecture diagram in `skills/README.md`](./skills/README.md#three-layer-architecture). Optionally, a SessionStart hook running **[`jrag prime --hook-json`](./docs/JRAG-CLI.md#jrag-prime-optional-sessionstart-priming)** (manual wiring) can inject orientation at session start instead of relying on the skill alone.
 
 ---
 

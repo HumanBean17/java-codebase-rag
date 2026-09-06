@@ -5,7 +5,7 @@ This module provides the `install` subcommand that walks users through:
 2. Embedding model selection
 3. Agent host selection
 4. Scope selection (project/user)
-5. Agent-surface wiring (SessionStart prime hook on 'cli', MCP server entry on 'mcp')
+5. Artifact deployment (MCP config, skill, agent)
 6. YAML config generation and indexing
 """
 
@@ -28,14 +28,6 @@ Surface = Literal["mcp", "cli"]
 
 # MCP server name constant
 _MCP_SERVER_NAME = "java-codebase-rag"
-
-# SessionStart hook constants. The marker is how we recognize our own hook
-# entry inside a host's settings.json — see ``_is_prime_hook_entry``.
-_HOOK_EVENT = "SessionStart"
-# Binary-agnostic: the entry may have been installed under either console
-# script (``jrag`` or the legacy ``java-codebase-rag``), so only the
-# ``prime --hook-json`` invocation suffix identifies the entry as ours.
-_HOOK_MARKER = " prime --hook-json"
 
 # Marker file written at install time so a CLI-only install (no MCP entry) is
 # still visible to ``update``. Lives at the project/source root alongside
@@ -64,8 +56,8 @@ class ConfiguredHost(NamedTuple):
 
     Replaces the prior 2-tuple ``(HostConfig, scope)`` returned by
     ``detect_configured_hosts`` so ``update`` can route the refresh through the
-    correct ``Surface`` (an MCP-surface install refreshes the MCP entry; a
-    CLI-surface install refreshes the SessionStart prime hook).
+    correct ``Surface`` (an MCP-surface install refreshes MCP+skill+agent; a
+    CLI-surface install refreshes the CLI skill+agent only).
     """
 
     host: "HostConfig"
@@ -129,49 +121,33 @@ HOSTS: dict[str, HostConfig] = {
 
 # ---------------------------------------------------------------------------
 # ArtifactManifest — single source of truth for which artifacts each surface
-# ships. Iterated by ``deploy_artifacts``, ``refresh_artifacts`` and
-# ``_undeploy_surface`` so adding/removing an artifact is one edit, not three.
+# ships. Iterated by both ``deploy_artifacts`` and ``refresh_artifacts`` so
+# adding/removing an artifact is one edit, not two.
 #
 # Each entry is a 3-tuple ``(kind, package_path, dest_relative)``:
 #   - ``kind``: "mcp" dispatches to ``_deploy_mcp_config`` / ``_refresh_mcp_config``
-#     / ``_remove_mcp_entry`` — the MCP config path is host/scope-resolved inside
-#     those helpers, so ``package_path`` and ``dest_relative`` are unused.
-#   - ``kind``: "hook" dispatches to ``_deploy_hook`` / ``_refresh_hook`` /
-#     ``_remove_hook`` — a SessionStart prime hook merged into the host
-#     settings.json (``hooks_settings_path``); again no paths are needed.
-#   - ``kind``: "skill" | "agent" dispatches to ``_deploy_file`` / ``_refresh_file``
-#     (kept for callers that still exercise the file helpers).
+#     (the MCP config path is host/scope-resolved inside those helpers —
+#     ``package_path`` and ``dest_relative`` are unused for this kind).
+#   - ``kind``: "skill" | "agent" dispatches to ``_deploy_file`` / ``_refresh_file``.
 #   - ``package_path``: relative path under ``install_data/``.
 #   - ``dest_relative``: relative path under ``host.scope_path(scope, cwd)``.
 #
-# NEITHER surface ships files: ``mcp`` registers the stdio MCP server entry
-# (tools only), ``cli`` installs a ``jrag prime`` SessionStart hook. Skill and
-# agent artifacts are legacy state on disk — cleanup is a separate concern.
+# The ``mcp`` surface carries the MCP config entry; the ``cli`` surface does
+# NOT (a CLI install never registers an MCP server).
 # ---------------------------------------------------------------------------
 ArtifactManifestEntry = tuple[str, str, str]
 
 ARTIFACT_MANIFEST: dict[Surface, list[ArtifactManifestEntry]] = {
     "mcp": [
         ("mcp", "", ""),
+        ("skill", "skills/explore-codebase/SKILL.md", "skills/explore-codebase/SKILL.md"),
+        ("agent", "agents/explorer-rag-enhanced.md", "agents/explorer-rag-enhanced.md"),
     ],
     "cli": [
-        ("hook", "", ""),
+        ("skill", "skills/explore-codebase-cli/SKILL.md", "skills/explore-codebase-cli/SKILL.md"),
+        ("agent", "agents/explorer-rag-cli.md", "agents/explorer-rag-cli.md"),
     ],
 }
-
-# What 0.12.x deployed as real files, before the surfaces went entry/hook only:
-# the mcp-surface pair and the cli-surface pair. These paths are in no manifest,
-# so no surface's teardown reaches them — ``run_update`` removes them explicitly
-# via ``_remove_legacy_artifacts`` (both pairs: a user may have switched surfaces
-# across versions, and the marker records only the current one). Entries are
-# dest-relative like manifest rows; the leading ``skills``/``agents`` segment
-# picks ``host.skills_dir`` vs ``host.agents_dir`` as the resolution root.
-_LEGACY_ARTIFACT_PATHS: tuple[str, ...] = (
-    "skills/explore-codebase/SKILL.md",
-    "agents/explorer-rag-enhanced.md",
-    "skills/explore-codebase-cli/SKILL.md",
-    "agents/explorer-rag-cli.md",
-)
 
 
 def prompt(
@@ -605,10 +581,10 @@ def select_surface(
 ) -> Surface:
     """Select 'mcp' or 'cli' surface (PR-JRAG-5).
 
-    The MCP surface registers the stdio MCP server (tools only). The CLI
-    surface installs a ``jrag prime`` SessionStart hook instead — no MCP entry
-    is registered and no files are deployed. The CLI surface is the recommended
-    default (listed first, marked "(Recommended)").
+    The MCP surface registers the stdio MCP server. The CLI surface ships the
+    ``jrag`` console-script skill+subagent instead — no MCP entry is registered.
+    The CLI surface is the recommended default (listed first, marked
+    "(Recommended)").
 
     Args:
         non_interactive: If True, honor ``cli_surface`` (default ``"cli"``).
@@ -634,8 +610,8 @@ def select_surface(
         return "cli"
 
     print(
-        "Note: 'cli' surface installs a `jrag prime` SessionStart hook "
-        "(one command per intent, no MCP server, no files) — recommended."
+        "Note: 'cli' surface deploys the `jrag` console-script skill+subagent "
+        "(one command per intent, no MCP server) — recommended."
     )
     print(
         "      'mcp' surface registers the java-codebase-rag MCP server "
@@ -650,6 +626,87 @@ def select_surface(
     selected = prompt(
         "select",
         "Select agent surface:",
+        choices=choices,
+        default=default,
+    )
+
+    if not selected:
+        return default
+    return selected  # type: ignore
+
+
+def _retrieval_choices() -> list[dict]:
+    """Choice list for the retrieval-mode select prompt.
+
+    Single source of truth for the retrieval option labels and order:
+    ``vectors`` is listed first and marked "(Recommended)" — semantic search is
+    the default for new installs. ``bm25`` stays available for machines that
+    must avoid the model download (or lack the vector stack entirely). The
+    returned dicts are normalized to ``questionary.Choice`` inside ``prompt``
+    so a value-based ``default`` (cursor position) validates.
+    """
+    return [
+        {"name": "vectors (Recommended)", "value": "vectors"},
+        {"name": "bm25", "value": "bm25"},
+    ]
+
+
+def select_retrieval(
+    *,
+    non_interactive: bool,
+    cli_retrieval: str | None,
+    prefill: str | None = None,
+) -> Literal["vectors", "bm25"]:
+    """Select 'vectors' or 'bm25' retrieval mode.
+
+    ``vectors`` embeds chunks into the Lance vector index (semantic search;
+    needs an embedding model). ``bm25`` is keyword search over the same chunks
+    — no model, no downloads, works offline. ``vectors`` is the recommended
+    default (listed first, marked "(Recommended)").
+
+    Args:
+        non_interactive: If True, honor ``cli_retrieval`` (default ``"vectors"``).
+        cli_retrieval: Retrieval mode from the ``--retrieval`` CLI flag.
+        prefill: On re-run, the mode recorded in the existing YAML config.
+            When valid, the cursor defaults to it so the user can keep the
+            prior choice with Enter (``vectors`` is still shown first +
+            recommended). Any other value (e.g. a hand-edited ``BM25``) falls
+            back to the ``vectors`` default rather than crashing the wizard.
+
+    Returns:
+        Selected retrieval mode (``"vectors"`` or ``"bm25"``).
+
+    Raises:
+        SystemExit(2): if ``cli_retrieval`` is invalid.
+    """
+    if cli_retrieval:
+        if cli_retrieval not in ("vectors", "bm25"):
+            print(f"Error: Invalid retrieval '{cli_retrieval}'. Must be 'vectors' or 'bm25'.")
+            raise SystemExit(2)
+        return cli_retrieval  # type: ignore
+
+    if non_interactive:
+        # Default to the recommended vectors mode when no flag is passed.
+        return "vectors"
+
+    print(
+        "Note: 'vectors' needs an embedding model (auto-downloaded from Hugging "
+        "Face, or a local path); 'bm25' is keyword search — no model, no "
+        "downloads, works offline. In bm25 mode the Lance source table is not "
+        "searched (Java/Kotlin symbols only)."
+    )
+
+    # vectors is always shown first + recommended; the cursor defaults to the
+    # prior choice (prefill) on re-run so the user can keep it with Enter.
+    # questionary validates `default` against the choice values, so an invalid
+    # prefill (hand-edited YAML, e.g. "BM25") must be clamped — it would raise
+    # ValueError and kill the wizard instead of degrading to the default.
+    choices = _retrieval_choices()
+    default = prefill if prefill in ("vectors", "bm25") else "vectors"
+
+    selected = prompt(
+        "select",
+        "Select retrieval mode:",
         choices=choices,
         default=default,
     )
@@ -790,18 +847,6 @@ def merge_mcp_config(config_path: Path, host: HostConfig, *, mcp_command: str) -
     config["mcpServers"][_MCP_SERVER_NAME] = new_entry
 
     # Write atomically (write to tmp, then rename)
-    _write_json_atomic(config_path, config)
-    return True
-
-
-def _write_json_atomic(config_path: Path, config: dict) -> None:
-    """Write ``config`` to ``config_path`` atomically (tmp file, fsync, rename).
-
-    Shared by ``merge_mcp_config`` and the SessionStart hook helpers so every
-    host settings/MCP file gets the same crash-safety: a temp file in the
-    destination directory, an fsync'd dump, then ``os.replace``. A failed write
-    never leaves a half-written destination behind.
-    """
     tmp_name = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -817,6 +862,7 @@ def _write_json_atomic(config_path: Path, config: dict) -> None:
 
         # Atomic rename
         os.replace(tmp_name, config_path)
+        return True
     except (IOError, OSError) as e:
         if tmp_name:
             try:
@@ -824,299 +870,6 @@ def _write_json_atomic(config_path: Path, config: dict) -> None:
             except OSError:
                 pass
         raise RuntimeError(f"Failed to write {config_path}: {e}") from e
-
-
-def _read_settings_json(config_path: Path) -> dict:
-    """Read a settings JSON file; missing file is ``{}``, invalid JSON raises.
-
-    Same read contract as ``merge_mcp_config`` so a settings file the host has
-    never written yet (fresh project scope) is indistinguishable from an empty
-    one, while a corrupt file fails loudly instead of being silently replaced.
-    """
-    if config_path.is_file():
-        try:
-            with open(config_path, "r") as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse {config_path}: {e}") from e
-    return {}
-
-
-def hooks_settings_path(host: HostConfig, scope: Scope, cwd: Path) -> Path:
-    """Return the host's settings.json — where SessionStart hooks are configured.
-
-    All three hosts keep hooks in the settings.json inside their host
-    directory: claude-code at ``.claude/settings.json`` (project) or
-    ``~/.claude/settings.json`` (user); qwen-code/gigacode in the very file
-    their MCP config already uses (``.qwen/settings.json``,
-    ``.gigacode/settings.json``), so one file holds both surfaces.
-    """
-    return host.scope_path(scope, cwd) / "settings.json"
-
-
-def _is_prime_hook_entry(entry: object) -> bool:
-    """True if a hook command entry is ours: type "command", command carries our prime invocation.
-
-    Matching on the `` prime --hook-json`` suffix rather than an exact command
-    keeps the identification stable across absolute-path moves and argument
-    changes — and across the binary name, since the hook may have been
-    installed via the legacy ``java-codebase-rag`` console script rather than
-    ``jrag``. Anything claiming to be our prime hook is ours to replace or
-    remove.
-    """
-    return (
-        isinstance(entry, dict)
-        and entry.get("type") == "command"
-        and isinstance(entry.get("command"), str)
-        and _HOOK_MARKER in entry["command"]
-    )
-
-
-def merge_session_start_hook(config_path: Path, *, hook_command: str) -> bool:
-    """Read, merge, write our SessionStart hook. Returns True if a write happened.
-
-    Ensures ``hooks -> SessionStart`` holds a list of matcher objects and that
-    exactly one of them — the ``{"matcher": "", ...}`` catch-all — carries our
-    command entry. A stale entry of ours (either binary name — ``jrag`` or the
-    legacy ``java-codebase-rag``) is replaced in place; when absent the entry
-    is appended. No other matcher, command entry, or sibling top-level key is
-    removed or reordered.
-
-    Args:
-        config_path: Path to the host settings.json
-        hook_command: Full hook command line to install
-
-    Returns:
-        True if the entry was added/updated, False if no change was needed
-
-    Raises:
-        ValueError: If the existing settings file cannot be parsed as JSON
-    """
-    config = _read_settings_json(config_path)
-
-    hooks = config.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-        config["hooks"] = hooks
-    matchers = hooks.get(_HOOK_EVENT)
-    if not isinstance(matchers, list):
-        matchers = []
-        hooks[_HOOK_EVENT] = matchers
-
-    # Find (or create) the "" matcher that fires on every session start
-    matcher = next(
-        (m for m in matchers if isinstance(m, dict) and m.get("matcher") == ""),
-        None,
-    )
-    if matcher is None:
-        matcher = {"matcher": "", "hooks": []}
-        matchers.append(matcher)
-    entries = matcher.get("hooks")
-    if not isinstance(entries, list):
-        entries = []
-        matcher["hooks"] = entries
-
-    new_entry = {"type": "command", "command": hook_command}
-    ours = [i for i, entry in enumerate(entries) if _is_prime_hook_entry(entry)]
-    if not ours:
-        entries.append(new_entry)
-    else:
-        first = ours[0]
-        if ours == [first] and entries[first] == new_entry:
-            return False  # already installed with this exact command
-        entries[first] = new_entry
-        for i in reversed(ours[1:]):  # defensive: collapse duplicates
-            del entries[i]
-
-    _write_json_atomic(config_path, config)
-    return True
-
-
-def _remove_session_start_hook(config_path: Path, *, dry_run: bool = False) -> bool:
-    """Remove our SessionStart hook entry. Returns True if a removal was needed.
-
-    Drops only command entries we own, then prunes the containers our entry was
-    the last tenant of: the matcher object (empty ``hooks`` list), the
-    ``SessionStart`` list, and the ``hooks`` object. A missing file or an
-    already-absent entry is a no-op success. ``dry_run=True`` reports the
-    removal without touching the file.
-
-    Raises:
-        ValueError: If the existing settings file cannot be parsed as JSON
-    """
-    config = _read_settings_json(config_path)
-
-    hooks = config.get("hooks")
-    if not isinstance(hooks, dict):
-        return False
-    matchers = hooks.get(_HOOK_EVENT)
-    if not isinstance(matchers, list):
-        return False
-
-    changed = False
-    emptied: list[int] = []
-    for index, matcher in enumerate(matchers):
-        if not isinstance(matcher, dict):
-            continue
-        entries = matcher.get("hooks")
-        if not isinstance(entries, list):
-            continue
-        kept = [e for e in entries if not _is_prime_hook_entry(e)]
-        if len(kept) == len(entries):
-            continue
-        changed = True
-        if kept:
-            matcher["hooks"] = kept
-        else:
-            emptied.append(index)
-
-    if not changed:
-        return False
-
-    # Prune only the matchers OUR removal emptied — a pre-existing empty
-    # matcher belongs to the host, not to us.
-    for index in reversed(emptied):
-        del matchers[index]
-    if not matchers:
-        del hooks[_HOOK_EVENT]
-    if not hooks:
-        del config["hooks"]
-
-    if dry_run:
-        return True
-    _write_json_atomic(config_path, config)
-    return True
-
-
-def _prime_hook_command() -> str:
-    """Return the SessionStart hook command line (``<jrag> prime --hook-json``).
-
-    The ``jrag`` binary comes from the same resolution the install wizard uses
-    for the cli surface (``resolve_mcp_command`` -> ``_surface_binary("cli")``).
-    """
-    jrag_bin = resolve_mcp_command(non_interactive=True, surface="cli")
-    return f"{jrag_bin} prime --hook-json"
-
-
-def _installed_hook_command(config_path: Path) -> str | None:
-    """Return our installed SessionStart hook command, or ``None`` when absent.
-
-    Walks the same ``hooks -> SessionStart -> matcher`` shape the merge/remove
-    helpers do. ``None`` also covers "absent" and "duplicated" — the caller only
-    compares against the desired command, and ``merge_session_start_hook``
-    collapses duplicates when it writes.
-
-    Raises:
-        ValueError: If the existing settings file cannot be parsed as JSON
-    """
-    config = _read_settings_json(config_path)
-    hooks = config.get("hooks")
-    if not isinstance(hooks, dict):
-        return None
-    matchers = hooks.get(_HOOK_EVENT)
-    if not isinstance(matchers, list):
-        return None
-
-    commands: list[str] = []
-    for matcher in matchers:
-        if not isinstance(matcher, dict):
-            continue
-        entries = matcher.get("hooks")
-        if not isinstance(entries, list):
-            continue
-        commands.extend(e["command"] for e in entries if _is_prime_hook_entry(e))
-    return commands[0] if len(commands) == 1 else None
-
-
-def _deploy_hook(config_path: Path, *, hook_command: str) -> ArtifactResult:
-    """Deploy our SessionStart prime hook entry into a host settings.json."""
-    try:
-        # Ensure parent directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Check writability
-        if not _is_writable(config_path.parent):
-            return ArtifactResult(
-                path=config_path,
-                success=False,
-                error=f"Directory not writable: {config_path.parent}",
-            )
-
-        # Merge hook (returns True if updated, False if already current)
-        merge_session_start_hook(config_path, hook_command=hook_command)
-        return ArtifactResult(path=config_path, success=True, error=None)
-    except ValueError as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-    except Exception as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-
-
-def _refresh_hook(
-    config_path: Path,
-    *,
-    force: bool,
-    dry_run: bool,
-) -> ArtifactResult:
-    """Refresh the SessionStart hook entry (update command path if needed).
-
-    The hook is content-addressed by the resolved ``jrag`` path, so a matching
-    entry needs no rewrite — ``force`` is inert for this kind: unlike a
-    skill/agent file there is no shipped payload worth re-copying.
-    """
-    try:
-        hook_command = _prime_hook_command()
-
-        if _installed_hook_command(config_path) == hook_command and not force:
-            return ArtifactResult(path=config_path, success=True, error=None)
-
-        if dry_run:
-            print(f"Would update SessionStart hook at {config_path}")
-            return ArtifactResult(path=config_path, success=True, error=None)
-
-        # Ensure parent directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Check writability
-        if not _is_writable(config_path.parent):
-            return ArtifactResult(
-                path=config_path,
-                success=False,
-                error=f"Directory not writable: {config_path.parent}",
-            )
-
-        changed = merge_session_start_hook(config_path, hook_command=hook_command)
-        if changed:
-            print(f"Updated SessionStart hook at {config_path}")
-        return ArtifactResult(path=config_path, success=True, error=None)
-
-    except SystemExit:
-        # resolve_mcp_command raises when jrag is not on PATH
-        return ArtifactResult(
-            path=config_path, success=False, error="jrag not found on PATH"
-        )
-    except ValueError as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-    except Exception as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-
-
-def _remove_hook(config_path: Path, *, dry_run: bool) -> ArtifactResult:
-    """Remove our SessionStart hook entry (surface migration teardown).
-
-    A corrupt settings file is a FAILED result, not a raised error: one broken
-    host file must not abort the surface switch — ``_undeploy_surface`` keeps
-    iterating and ``run_update`` reports the warning with a partial exit code.
-    """
-    try:
-        changed = _remove_session_start_hook(config_path, dry_run=dry_run)
-    except ValueError as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-    except Exception as e:
-        return ArtifactResult(path=config_path, success=False, error=str(e))
-
-    if changed:
-        print(f"{'Would remove' if dry_run else 'Removed'} SessionStart hook from {config_path}")
-    return ArtifactResult(path=config_path, success=True, error=None)
 
 
 def _read_package_artifact(relative_path: str) -> str:
@@ -1136,7 +889,7 @@ def deploy_artifacts(
     mcp_command: str,
     surface: Surface = "mcp",
 ) -> list[ArtifactResult]:
-    """Deploy artifacts (MCP entry / SessionStart hook) to selected hosts.
+    """Deploy artifacts (MCP config, skill, agent) to selected hosts.
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so both surfaces share one source
     of truth. The keyword-only ``surface`` defaults to ``"mcp"`` so existing
@@ -1149,8 +902,8 @@ def deploy_artifacts(
         non_interactive: If True, skip overwrite prompts
         mcp_command: Resolved absolute path to the runtime binary
             (``java-codebase-rag-mcp`` for ``mcp`` surface; ``jrag`` for
-            ``cli`` surface, where it becomes the SessionStart hook command —
-            no MCP config is registered).
+            ``cli`` surface — unused for the latter since CLI ships no MCP
+            config).
         surface: Which artifact set to deploy (default ``"mcp"`` for back-comat).
 
     Returns:
@@ -1170,16 +923,6 @@ def deploy_artifacts(
                     host,
                     non_interactive=non_interactive,
                     mcp_command=mcp_command,
-                )
-            elif kind == "hook":
-                # Only the CLI surface carries this row: a ``jrag prime``
-                # SessionStart hook in the host settings.json. ``mcp_command``
-                # IS the resolved ``jrag`` binary on this surface (resolved by
-                # the caller via resolve_mcp_command(surface="cli")).
-                hook_config_path = hooks_settings_path(host, scope, cwd)
-                result = _deploy_hook(
-                    hook_config_path,
-                    hook_command=f"{mcp_command} prime --hook-json",
                 )
             else:
                 dest_path = host.scope_path(scope, cwd) / dest_relative
@@ -1307,6 +1050,8 @@ def generate_yaml_config(
     model: str,
     microservice_roots: list[str] | None,
     existing_yaml: dict | None,
+    *,
+    retrieval: str = "vectors",
 ) -> str:
     """Generate .java-codebase-rag.yml content from installer answers.
 
@@ -1315,6 +1060,7 @@ def generate_yaml_config(
         model: Embedding model path or "auto"
         microservice_roots: List of microservice roots (None means all)
         existing_yaml: Existing YAML data for re-run update mode
+        retrieval: Retrieval mode ("vectors" or "bm25")
 
     Returns:
         YAML configuration string
@@ -1340,6 +1086,14 @@ def generate_yaml_config(
             del config["embedding"]
         else:
             config["embedding"].pop("model", None)
+
+    # Write retrieval only when it is not the default (vectors); a re-run
+    # switching back to vectors drops the key (mirrors the model removal above)
+    # so the YAML never pins a mode the user moved away from.
+    if retrieval == "bm25":
+        config["retrieval"] = "bm25"
+    elif "retrieval" in config:
+        del config["retrieval"]
 
     # Seed cross-service resolution safe-by-default: only evidence-backed cross-service
     # edges survive (see _is_brownfield_sourced in build_ast_graph). setdefault preserves
@@ -1428,6 +1182,7 @@ def run_init_if_needed(
     non_interactive: bool,
     quiet: bool,
     verbose: bool = False,
+    retrieval: str | None = None,
 ) -> bool | None:
     """Run init if index directory has no artifacts.
 
@@ -1446,6 +1201,11 @@ def run_init_if_needed(
         non_interactive: If True, suppress prompts
         quiet: If True, suppress progress output
         verbose: If True, raw-relay subprocess output (no Live region)
+        retrieval: Effective retrieval mode from the wizard (``"vectors"`` or
+            ``"bm25"``). Threaded into ``resolve_operator_config`` as the CLI
+            tier so an ambient ``JAVA_CODEBASE_RAG_RETRIEVAL`` cannot flip this
+            sub-step against the choice the operator just made in the SAME
+            ``jrag install`` run (``None`` defers to the env tier, as before).
 
     Returns:
         True if init ran and succeeded; False if it ran and failed (cocoindex or
@@ -1456,9 +1216,16 @@ def run_init_if_needed(
     from java_codebase_rag.config import (
         index_dir_has_existing_artifacts,
         resolve_operator_config,
+        retrieval_mode_from_env,
         write_config_source_pointer,
     )
-    from java_codebase_rag.pipeline import is_cocoindex_preflight_blocker, run_build_ast_graph, run_cocoindex_update
+    from java_codebase_rag.pipeline import (
+        RETRIEVAL_BM25_HINT,
+        VECTORS_SKIPPED_BM25,
+        is_cocoindex_preflight_blocker,
+        run_build_ast_graph,
+        run_cocoindex_update,
+    )
 
     has_existing, _ = index_dir_has_existing_artifacts(index_dir)
     if has_existing:
@@ -1469,6 +1236,7 @@ def run_init_if_needed(
         source_root=source_root,
         cli_index_dir=None,  # use default (<source_root>/.java-codebase-rag)
         cli_embedding_model=model if model != "auto" else None,
+        cli_retrieval=retrieval,
     )
     cfg.apply_to_os_environ()
     env = cfg.subprocess_env()
@@ -1489,31 +1257,47 @@ def run_init_if_needed(
         renderer.start()
     index_ok = True
     try:
-        coco = run_cocoindex_update(
-            env,
-            full_reprocess=False,
-            quiet=quiet,
-            verbose=verbose,
-            on_progress=on_progress,
-            on_progress_console=on_progress_console,
-        )
-        # Graph-only install (cocoindex absent, e.g. macOS Intel): skip the vectors phase
-        # and build the graph rather than failing install. A genuine non-zero cocoindex
-        # exit still fails.
-        vectors_skipped = is_cocoindex_preflight_blocker(coco)
-        if coco.returncode != 0 and not vectors_skipped:
-            print(
-                f"Error: CocoIndex update failed with code {coco.returncode}",
-                file=sys.stderr,
-            )
-            index_ok = False
+        # bm25 retrieval: there are no vectors to build, so cocoindex is never
+        # spawned (no cocoindex progress event either, so the renderer's vectors
+        # task stays unspawned instead of hanging at running). Same graph-only
+        # proceed as the stack-absent branch below.
+        bm25_mode = cfg.retrieval == "bm25"
+        vectors_skipped = bm25_mode
+        coco_failed = False
+        if bm25_mode:
+            print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
         else:
-            if vectors_skipped:
+            coco = run_cocoindex_update(
+                env,
+                full_reprocess=False,
+                quiet=quiet,
+                verbose=verbose,
+                on_progress=on_progress,
+                on_progress_console=on_progress_console,
+            )
+            # Graph-only install (cocoindex absent, e.g. macOS Intel): skip the vectors
+            # phase and build the graph rather than failing install. A genuine
+            # non-zero cocoindex exit still fails.
+            vectors_skipped = is_cocoindex_preflight_blocker(coco)
+            coco_failed = coco.returncode != 0 and not vectors_skipped
+            if coco_failed:
+                print(
+                    f"Error: CocoIndex update failed with code {coco.returncode}",
+                    file=sys.stderr,
+                )
+                # Remediation hint (suppressed when the mode is already bm25 —
+                # the guard is unreachable here today, kept honest on purpose).
+                if retrieval_mode_from_env() != "bm25":
+                    print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+            elif vectors_skipped:
                 print(
                     "jrag: vectors skipped — vector stack not installed on this "
                     "platform (graph-only mode). Building graph only; semantic search is unavailable.",
                     file=sys.stderr,
                 )
+        if coco_failed:
+            index_ok = False
+        else:
             g = run_build_ast_graph(
                 source_root=cfg.source_root,
                 ladybug_path=cfg.ladybug_path,
@@ -1761,7 +1545,7 @@ def refresh_artifacts(
     dry_run: bool,
     surface: Surface = "mcp",
 ) -> list[ArtifactResult]:
-    """Refresh the surface's artifacts (MCP entry path / SessionStart hook).
+    """Overwrite skill and agent files from package data. Skip MCP if entry is correct.
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so both surfaces share one source
     of truth (PR-JRAG-5). The keyword-only ``surface`` defaults to ``"mcp"``
@@ -1771,7 +1555,7 @@ def refresh_artifacts(
         host: HostConfig for the agent host
         scope: Installation scope ("project" or "user")
         cwd: Current working directory
-        force: If True, overwrite all files even if matching (inert for the hook)
+        force: If True, overwrite all files even if matching
         dry_run: If True, print changes without writing
         surface: Which artifact set to refresh (default ``"mcp"`` for back-comat).
 
@@ -1790,11 +1574,6 @@ def refresh_artifacts(
             # surface ships no MCP entry, so there is nothing to refresh.
             mcp_config_path = host.mcp_config_path(scope, cwd)
             result = _refresh_mcp_config(mcp_config_path, host, force=force, dry_run=dry_run)
-        elif kind == "hook":
-            # Refresh the SessionStart hook: the command is re-resolved so a
-            # moved ``jrag`` binary (e.g. a rebuilt venv) is repaired in place.
-            hook_config_path = hooks_settings_path(host, scope, cwd)
-            result = _refresh_hook(hook_config_path, force=force, dry_run=dry_run)
         else:
             dest_path = host.scope_path(scope, cwd) / dest_relative
             result = _refresh_file(
@@ -2072,60 +1851,19 @@ def _undeploy_surface(
     """Tear down every artifact a surface shipped (migration off ``surface``).
 
     Iterates ``ARTIFACT_MANIFEST[surface]`` so adding/removing an artifact is
-    one manifest edit, not three — mirrors ``deploy_artifacts``/``refresh_artifacts``.
-    The ``mcp`` row removes just our server entry; the ``hook`` row removes our
-    SessionStart entry. Returns one ``ArtifactResult`` per manifest row, and a
-    failure (e.g. a corrupt settings file) never stops the remaining rows.
+    one manifest edit, not two — mirrors ``deploy_artifacts``/``refresh_artifacts``.
+    The ``mcp`` row removes just our server entry; ``skill``/``agent`` rows
+    remove the file. Returns one ``ArtifactResult`` per manifest row.
     """
     results: list[ArtifactResult] = []
     for kind, _package_path, dest_relative in ARTIFACT_MANIFEST[surface]:
         if kind == "mcp":
             mcp_config_path = host.mcp_config_path(scope, cwd)
             results.append(_remove_mcp_entry(mcp_config_path, dry_run=dry_run))
-        elif kind == "hook":
-            hook_config_path = hooks_settings_path(host, scope, cwd)
-            results.append(_remove_hook(hook_config_path, dry_run=dry_run))
         else:
             dest_path = host.scope_path(scope, cwd) / dest_relative
             results.append(_remove_artifact_file(dest_path, dry_run=dry_run))
     return results
-
-
-def _remove_legacy_artifacts(
-    hosts: list[HostConfig], scope: Scope, cwd: Path, *, dry_run: bool = False
-) -> list[str]:
-    """Remove the 0.12.x skill/agent file deployments (update-time cleanup).
-
-    Those files are in no ``ARTIFACT_MANIFEST``, so no surface's teardown can
-    reach them; every legacy path is attempted for every host — whatever the
-    host's current surface is — because a user may have switched surfaces
-    across versions and the marker records only the current one. Paths resolve
-    against ``host.skills_dir``/``host.agents_dir`` exactly like manifest rows.
-
-    Returns the removed paths (with ``dry_run``, the paths that would be
-    removed); an empty list means nothing to do and is still a success.
-    Best-effort: a file that fails to remove warns but never fails the update.
-    """
-    removed: list[str] = []
-    for host in hosts:
-        for dest_relative in _LEGACY_ARTIFACT_PATHS:
-            root, _, leaf = dest_relative.partition("/")
-            base = (
-                host.skills_dir(scope, cwd)
-                if root == "skills"
-                else host.agents_dir(scope, cwd)
-            )
-            dest_path = base / leaf
-            # Probe first: absent files are nothing to do, and a removal (or a
-            # dry run) must not report paths that were never there.
-            if not dest_path.is_file():
-                continue
-            result = _remove_artifact_file(dest_path, dry_run=dry_run)
-            if result.success:
-                removed.append(str(dest_path))
-            else:
-                print(f"Warning: {result.error}")
-    return removed
 
 
 def _resolve_update_surface(*, surface: str | None, current: Surface) -> Surface | None:
@@ -2252,22 +1990,6 @@ def run_update(
             )
             return EXIT_PARTIAL
 
-    # Legacy 0.12.x cleanup — unconditional, for both surfaces and both the
-    # refresh and the migration branches below: those installs shipped real
-    # skill/agent files no manifest knows about, so nothing else ever removes
-    # them. Grouped by scope because one marker can mix scopes.
-    hosts_by_scope: dict[Scope, list[HostConfig]] = {}
-    for host_config, scope, _host_surface in configured_hosts:
-        hosts_by_scope.setdefault(scope, []).append(host_config)
-    legacy_removed: list[str] = []
-    for scope, scope_hosts in hosts_by_scope.items():
-        legacy_removed.extend(
-            _remove_legacy_artifacts(scope_hosts, scope, cwd, dry_run=dry_run)
-        )
-    if legacy_removed:
-        verb = "Would remove" if dry_run else "Removed"
-        print(f"{verb} {len(legacy_removed)} legacy skill/agent file(s).")
-
     # Refresh (or migrate) artifacts for each host. When chosen_surface is None
     # (non-TTY, no flag) every host takes the refresh branch on its own surface.
     all_results = []
@@ -2341,9 +2063,16 @@ def run_update(
         discover_project_root,
         index_dir_has_existing_artifacts,
         resolve_operator_config,
+        retrieval_mode_from_env,
         write_config_source_pointer,
     )
-    from java_codebase_rag.pipeline import is_cocoindex_preflight_blocker, run_cocoindex_update, run_incremental_graph
+    from java_codebase_rag.pipeline import (
+        RETRIEVAL_BM25_HINT,
+        VECTORS_SKIPPED_BM25,
+        is_cocoindex_preflight_blocker,
+        run_cocoindex_update,
+        run_incremental_graph,
+    )
 
     project_root = discover_project_root(cwd)
     if project_root is None:
@@ -2398,30 +2127,44 @@ def run_update(
             renderer.start()
         index_ok = True
         try:
-            coco = run_cocoindex_update(
-                env,
-                full_reprocess=False,
-                quiet=quiet,
-                verbose=verbose,
-                on_progress=on_progress,
-                on_progress_console=on_progress_console,
-            )
-            # Graph-only install (cocoindex absent): skip the vectors catch-up and run the
-            # graph catch-up only. A genuine non-zero cocoindex exit still fails.
-            vectors_skipped = is_cocoindex_preflight_blocker(coco)
-            if coco.returncode != 0 and not vectors_skipped:
-                print(
-                    f"Error: Lance index update failed with code {coco.returncode}",
-                    file=sys.stderr,
-                )
-                index_ok = False
+            # bm25 retrieval: there are no vectors to build, so cocoindex is never
+            # spawned (no cocoindex progress event either, so the renderer's vectors
+            # task stays unspawned instead of hanging at running). Same graph-only
+            # catch-up as the stack-absent branch below.
+            bm25_mode = cfg.retrieval == "bm25"
+            vectors_skipped = bm25_mode
+            coco_failed = False
+            if bm25_mode:
+                print(VECTORS_SKIPPED_BM25, file=sys.stderr, flush=True)
             else:
-                if vectors_skipped:
+                coco = run_cocoindex_update(
+                    env,
+                    full_reprocess=False,
+                    quiet=quiet,
+                    verbose=verbose,
+                    on_progress=on_progress,
+                    on_progress_console=on_progress_console,
+                )
+                # Graph-only install (cocoindex absent): skip the vectors catch-up and run
+                # the graph catch-up only. A genuine non-zero cocoindex exit still fails.
+                vectors_skipped = is_cocoindex_preflight_blocker(coco)
+                coco_failed = coco.returncode != 0 and not vectors_skipped
+                if coco_failed:
+                    print(
+                        f"Error: Lance index update failed with code {coco.returncode}",
+                        file=sys.stderr,
+                    )
+                    if retrieval_mode_from_env() != "bm25":
+                        print(RETRIEVAL_BM25_HINT, file=sys.stderr, flush=True)
+                elif vectors_skipped:
                     print(
                         "jrag: vectors skipped — vector stack not installed on this "
                         "platform (graph-only mode). Running graph catch-up only.",
                         file=sys.stderr,
                     )
+            if coco_failed:
+                index_ok = False
+            else:
                 g = run_incremental_graph(
                     source_root=cfg.source_root,
                     ladybug_path=cfg.ladybug_path,
@@ -2477,6 +2220,7 @@ def run_install(
     agents: list[str] | None,
     scope: str | None,
     model: str | None,
+    retrieval: str | None = None,
     surface: str | None = None,
     source_root: Path | None = None,
     quiet: bool = False,
@@ -2489,6 +2233,8 @@ def run_install(
         agents: List of agent names from CLI flags
         scope: Scope from CLI flag
         model: Model from CLI flag
+        retrieval: Retrieval mode from CLI flag (``"vectors"`` or ``"bm25"``;
+            default ``"vectors"``)
         surface: Surface from CLI flag (``"mcp"`` or ``"cli"``; default ``"mcp"``)
         source_root: Source root path (defaults to cwd if None)
         quiet: If True, suppress output
@@ -2535,20 +2281,36 @@ def run_install(
         except SystemExit as e:
             return e.code
 
-    # Stage 2: Embedding model
+    # Stage 2: Retrieval mode + embedding model
     from java_codebase_rag.pipeline import vector_stack_installed
 
     if not vector_stack_installed():
         # Graph-only install (macOS Intel): no torch/lancedb, so there is no vector
-        # index to embed into — the embedding-model choice is inert here. Skip the
-        # prompt and let init build the graph (vectors phase auto-skipped).
+        # index to embed into — bm25 keyword search is the only usable mode and the
+        # embedding-model choice is inert here. Force both and let init build the
+        # graph (vectors phase auto-skipped).
         print(
             "Skipping embedding model selection: vector stack not installed on this "
             "platform (graph-only mode)."
         )
+        retrieval = "bm25"
         resolved_model = "auto"
     else:
-        resolved_model = resolve_model(model, non_interactive=non_interactive)
+        retrieval = select_retrieval(
+            non_interactive=non_interactive,
+            cli_retrieval=retrieval,
+            prefill=existing_config.get("retrieval") if existing_config else None,
+        )
+        if retrieval == "bm25":
+            # Keyword search needs no embedding model, so the model question is
+            # inert — do not resolve (or prompt for) a model that is never used.
+            print(
+                "Skipping embedding model selection: retrieval mode is bm25 "
+                "(keyword search; no model needed)."
+            )
+            resolved_model = "auto"
+        else:
+            resolved_model = resolve_model(model, non_interactive=non_interactive)
 
     # Stage 3-4: Agent host + scope + surface selection
     prior_surface = _prior_surface_from_marker(cwd)
@@ -2615,6 +2377,7 @@ def run_install(
         resolved_model,
         microservice_roots=selected_roots,
         existing_yaml=existing_config,
+        retrieval=retrieval,
     )
 
     # Write YAML config
@@ -2630,7 +2393,9 @@ def run_install(
     # Run init if index directory is empty. run_init_if_needed returns True (ran
     # OK), False (ran and failed — cocoindex/graph non-zero exit), or None
     # (skipped: index already exists). A failed index must NOT report success in
-    # CI/automation; a skip is not a failure (issue #351).
+    # CI/automation; a skip is not a failure (issue #351). The post-Stage-2
+    # ``retrieval`` (flag, prefill choice, or the graph-only force) rides along
+    # so the sub-step resolves the SAME mode the wizard just wrote to the YAML.
     index_dir = (source_root / ".java-codebase-rag").resolve()
     init_outcome = run_init_if_needed(
         source_root,
@@ -2639,6 +2404,7 @@ def run_install(
         non_interactive=non_interactive,
         quiet=quiet,
         verbose=verbose,
+        retrieval=retrieval,
     )
     if init_outcome is False:
         return 1

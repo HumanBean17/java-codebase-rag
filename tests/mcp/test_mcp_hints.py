@@ -11,6 +11,7 @@ from java_codebase_rag.graph.java_ontology import FUZZY_STRATEGY_SET
 from java_codebase_rag.graph.ladybug_queries import LadybugGraph
 from java_codebase_rag.mcp.mcp_hints import (
     _StructuredHint,
+    _type_rollup_would_emit,
     finalize_structured_hints,
     generate_hints,
 )
@@ -419,22 +420,39 @@ def _service_with_injects_out(ladybug_graph) -> str:
     rows = ladybug_graph._rows(  # noqa: SLF001
         "MATCH (cls:Symbol)-[:INJECTS]->(dep:Symbol) "
         "WHERE cls.kind = 'class' AND cls.role = 'SERVICE' "
-        "RETURN cls.id AS id LIMIT 1",
+        "RETURN cls.id AS id ORDER BY id LIMIT 50",
     )
     if not rows:
         pytest.skip("no SERVICE class with INJECTS.out > 0 in fixture")
-    return str(rows[0]["id"])
+    # Same selection discipline as _type_with_injects_in: walk ordered
+    # candidates and keep the first whose INJECTS.out hint is not suppressed
+    # by type rollup — the same edge_summary guard the describe path applies.
+    for row in rows:
+        tid = str(row["id"])
+        out = describe_v2(tid, graph=ladybug_graph)
+        if out.record and not _type_rollup_would_emit(out.record.edge_summary):
+            return tid
+    pytest.skip("no rollup-free SERVICE class with INJECTS.out in fixture")
 
 
 def _type_with_injects_in(ladybug_graph) -> str:
     rows = ladybug_graph._rows(  # noqa: SLF001
         "MATCH (dep:Symbol)<-[:INJECTS]-(cls:Symbol) "
         "WHERE dep.kind IN ['interface', 'class'] "
-        "RETURN DISTINCT dep.id AS id LIMIT 1",
+        "RETURN DISTINCT dep.id AS id ORDER BY id LIMIT 50",
     )
     if not rows:
         pytest.skip("no type with INJECTS.in > 0 in fixture")
-    return str(rows[0]["id"])
+    # Row order is platform-dependent without ORDER BY; walk candidates in id
+    # order and keep the first whose INJECTS.in hint is not suppressed by type
+    # rollup (DECLARES_CLIENT/EXPOSES/DECLARES_PRODUCER members) — same
+    # edge_summary the describe hints path reads, same guard it applies.
+    for row in rows:
+        tid = str(row["id"])
+        out = describe_v2(tid, graph=ladybug_graph)
+        if out.record and not _type_rollup_would_emit(out.record.edge_summary):
+            return tid
+    pytest.skip("no rollup-free type with INJECTS.in in fixture")
 
 
 def _method_with_mid_calls_out(ladybug_graph) -> str:

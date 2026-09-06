@@ -1,4 +1,4 @@
-"""Shared helpers for Java/SQL/YAML CocoIndex 1.0 apps (no ContextKeys here)."""
+"""Shared helpers for the JVM-source CocoIndex 1.0 app (no ContextKeys here)."""
 
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ SBERT_MODEL = os.path.expandvars(os.path.expanduser(os.environ.get("SBERT_MODEL"
 # rarely split mid-statement, fewer "orphan" import-only hits at chunk edges).
 # Requires re-index to apply.
 JAVA_CHUNK = (1500, 350, 220)
-SQL_CHUNK = (800, 100, 80)
-YAML_CHUNK = (600, 100, 60)
 
 
 def position_to_json(pos: TextPosition) -> dict[str, Any]:

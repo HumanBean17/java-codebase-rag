@@ -1,5 +1,5 @@
 """
-CocoIndex 1.0 app: index Java, Flyway SQL, and YAML into LanceDB.
+CocoIndex 1.0 app: index JVM sources (Java, Kotlin) into LanceDB.
 
 LanceDB requires a single primary key per table; each chunk gets a UUID `id`.
 
@@ -44,8 +44,6 @@ from java_codebase_rag.lance_optimize import LANCE_TABLE_NAMES
 from java_codebase_rag.index.java_index_v1_common import (
     JAVA_CHUNK,
     SBERT_MODEL,
-    SQL_CHUNK,
-    YAML_CHUNK,
     chunk_key_range,
     position_to_json,
 )
@@ -227,8 +225,6 @@ def _approximate_vectors_total(project_root: Path) -> int:
 
     Mirrors the ``localfs.walk_dir`` matchers in ``app_main``:
       - ``**/*.java`` and ``**/*.kt`` (registered language suffixes)
-      - ``**/src/main/resources/db/migration/*.sql``
-      - ``**/src/main/resources/application*.yml`` and ``.yaml``
     """
     ignore = LayeredIgnore(project_root)
     excluded = ignore.cocoindex_excluded_patterns()
@@ -261,22 +257,6 @@ def _approximate_vectors_total(project_root: Path) -> int:
             if fn.endswith(_INDEXED_SOURCE_SUFFIXES):
                 if not ignore.is_ignored(full):
                     total += 1
-                continue
-            # SQL: **/src/main/resources/db/migration/*.sql
-            if fn.endswith(".sql") and "/db/migration/" in rel:
-                if not ignore.is_ignored(full):
-                    total += 1
-                continue
-            # YAML: **/src/main/resources/application*.yml / .yaml
-            # NOTE: ``fn`` is the bare filename (e.g. ``application-cloud.yml``), so
-            # the prefix predicate must be ``fn.startswith("application")`` —
-            # ``"/application" in fn`` was always False (no leading slash in a bare
-            # name) and under-counted every application YAML, driving the pre-walk
-            # total below the actual done count. The ``rel``-based
-            # ``"/src/main/resources/"`` gate stays (full path component).
-            if fn.endswith((".yml", ".yaml")) and fn.startswith("application") and "/src/main/resources/" in rel:
-                if not ignore.is_ignored(full):
-                    total += 1
     return total
 
 
@@ -306,30 +286,6 @@ class JavaLanceChunk:
     # Generated source detection: populated per-file, not per-chunk
     generated: bool
     generated_by: str | None
-
-
-@dataclass
-class SqlLanceChunk:
-    id: str
-    filename: str
-    text: str
-    range_start: int
-    range_end: int
-    start: dict[str, Any]
-    end: dict[str, Any]
-    embedding: Annotated[npt.NDArray[np.float32], EMBEDDER]
-
-
-@dataclass
-class YamlLanceChunk:
-    id: str
-    filename: str
-    text: str
-    range_start: int
-    range_end: int
-    start: dict[str, Any]
-    end: dict[str, Any]
-    embedding: Annotated[npt.NDArray[np.float32], EMBEDDER]
 
 
 @coco.lifespan
@@ -605,105 +561,6 @@ async def process_kotlin_file(
         )
 
 
-@coco.fn(memo=True)
-async def process_sql_file(
-    file: localfs.File,
-    table: lancedb.TableTarget[SqlLanceChunk],
-) -> None:
-    embedder = coco.use_context(EMBEDDER)
-    project_root = coco.use_context(PROJECT_ROOT)
-    ignore = coco.use_context(IGNORE)
-    if ignore.is_ignored((project_root / file.file_path.path).resolve()):
-        return
-    try:
-        content = await file.read_text()
-    except UnicodeDecodeError:
-        return
-    if not content.strip():
-        return
-
-    _tick_vectors_done()
-
-    language = "sql"
-    cs, mn, ov = SQL_CHUNK
-    chunks = splitter.split(
-        content,
-        cs,
-        min_chunk_size=mn,
-        chunk_overlap=ov,
-        language=language,
-    )
-    rel = file.file_path.path.as_posix()
-
-    # (vectors perf lever #1) embed chunks concurrently → batched encode.
-    embeddings = await asyncio.gather(*(embedder.embed(ch.text) for ch in chunks))
-
-    for ch, emb in zip(chunks, embeddings):
-        rs, re = chunk_key_range(ch)
-        table.declare_row(
-            row=SqlLanceChunk(
-                id=str(uuid.uuid4()),
-                filename=rel,
-                text=ch.text,
-                range_start=rs,
-                range_end=re,
-                start=position_to_json(ch.start),
-                end=position_to_json(ch.end),
-                embedding=emb,
-            )
-        )
-
-
-@coco.fn(memo=True)
-async def process_yaml_file(
-    file: localfs.File,
-    table: lancedb.TableTarget[YamlLanceChunk],
-) -> None:
-    embedder = coco.use_context(EMBEDDER)
-    project_root = coco.use_context(PROJECT_ROOT)
-    ignore = coco.use_context(IGNORE)
-    if ignore.is_ignored((project_root / file.file_path.path).resolve()):
-        return
-    try:
-        content = await file.read_text()
-    except UnicodeDecodeError:
-        return
-    if not content.strip():
-        return
-
-    _tick_vectors_done()
-
-    ext = file.file_path.path.suffix.lower()
-    language = "yaml" if ext in (".yml", ".yaml") else "text"
-    cs, mn, ov = YAML_CHUNK
-    chunks = splitter.split(
-        content,
-        cs,
-        min_chunk_size=mn,
-        chunk_overlap=ov,
-        language=language,
-    )
-    rel = file.file_path.path.as_posix()
-
-    # (vectors perf lever #1) embed chunks concurrently → batched encode.
-    embeddings = await asyncio.gather(*(embedder.embed(ch.text) for ch in chunks))
-
-    for ch, emb in zip(chunks, embeddings):
-        rs, re = chunk_key_range(ch)
-        table.declare_row(
-            row=YamlLanceChunk(
-                id=str(uuid.uuid4()),
-                filename=rel,
-                text=ch.text,
-                range_start=rs,
-                range_end=re,
-                start=position_to_json(ch.start),
-                end=position_to_json(ch.end),
-                embedding=emb,
-            )
-        )
-
-
 async def _drain_files_concurrently(
     files: Any, process_fn: Any, table: Any, sem: asyncio.Semaphore
 ) -> None:
@@ -714,7 +571,7 @@ async def _drain_files_concurrently(
     ``_FILE_CONCURRENCY``). Materializes the async iterable up front — file
     handles are lightweight and cocoindex already realized the collection when
     the walker mounted, so this is not a second walk. An empty collection is a
-    no-op (e.g. SQL/YAML tables on a repo with none).
+    no-op (e.g. the kotlin walk on a grammar-absent install).
     """
     items = [f async for _, f in files.items()]
     if not items:
@@ -737,26 +594,6 @@ async def app_main() -> None:
         LANCE_DB,
         LANCE_TABLE_NAMES[0],
         java_schema,
-    )
-
-    sql_schema = await lancedb.TableSchema.from_class(
-        SqlLanceChunk,
-        primary_key=["id"],
-    )
-    sql_table = await lancedb.mount_table_target(
-        LANCE_DB,
-        LANCE_TABLE_NAMES[1],
-        sql_schema,
-    )
-
-    yaml_schema = await lancedb.TableSchema.from_class(
-        YamlLanceChunk,
-        primary_key=["id"],
-    )
-    yaml_table = await lancedb.mount_table_target(
-        LANCE_DB,
-        LANCE_TABLE_NAMES[2],
-        yaml_schema,
     )
 
     project_root = coco.use_context(PROJECT_ROOT)
@@ -816,25 +653,6 @@ async def app_main() -> None:
         if _KOTLIN_REGISTERED
         else None
     )
-    sql_files = localfs.walk_dir(
-        PROJECT_ROOT,
-        recursive=True,
-        path_matcher=PatternFilePathMatcher(
-            included_patterns=["**/src/main/resources/db/migration/*.sql"],
-            excluded_patterns=_walk_excludes,
-        ),
-    )
-    yaml_files = localfs.walk_dir(
-        PROJECT_ROOT,
-        recursive=True,
-        path_matcher=PatternFilePathMatcher(
-            included_patterns=[
-                "**/src/main/resources/application*.yml",
-                "**/src/main/resources/application*.yaml",
-            ],
-            excluded_patterns=_walk_excludes,
-        ),
-    )
 
     # PERF: declare all rows in ONE component (app_main) instead of one
     # component per file via coco.mount_each. cocoindex flushes target writes
@@ -854,8 +672,7 @@ async def app_main() -> None:
     # serial ``async for … await``. See ``_FILE_CONCURRENCY`` — this is what
     # lets the embedder's batching layer fill real batches (embedding dominates
     # init cost, and serial files starve it). One shared semaphore bounds total
-    # in-flight work; tables are drained in order (java dominates, sql/yaml are
-    # usually near-empty).
+    # in-flight work.
     _sem = asyncio.Semaphore(_FILE_CONCURRENCY)
     await _drain_files_concurrently(java_files, process_java_file, java_table, _sem)
     # Kotlin drains into the SAME ``java_table`` (JavaLanceChunk) — the chunk
@@ -869,8 +686,6 @@ async def app_main() -> None:
         await _drain_files_concurrently(
             kotlin_files, process_kotlin_file, java_table, _sem
         )
-    await _drain_files_concurrently(sql_files, process_sql_file, sql_table, _sem)
-    await _drain_files_concurrently(yaml_files, process_yaml_file, yaml_table, _sem)
 
 
 app = coco.App(

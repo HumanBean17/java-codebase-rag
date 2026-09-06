@@ -370,10 +370,11 @@ def test_layered_ignore_provided_once_per_flow() -> None:
     provide_count = source.count("builder.provide(IGNORE,")
     assert provide_count == 1, f"Expected 1 builder.provide(IGNORE,) call, found {provide_count}"
 
-    # Count coco.use_context(IGNORE) calls - should be exactly four (process_*_file:
-    # java, kotlin, sql, yaml). Kotlin drains into the same JavaLanceChunk table.
+    # Count coco.use_context(IGNORE) calls - should be exactly two (process_*_file:
+    # java, kotlin). Kotlin drains into the same JavaLanceChunk table. SQL/YAML
+    # extraction is gone by design: jrag indexes JVM sources only.
     use_count = source.count("coco.use_context(IGNORE)")
-    assert use_count == 4, f"Expected 4 coco.use_context(IGNORE) calls, found {use_count}"
+    assert use_count == 2, f"Expected 2 coco.use_context(IGNORE) calls, found {use_count}"
 
     # Verify no leftover LayeredIgnore(project_root).is_ignored calls in process sites
     # (the sentinel grep would catch this, but we assert it here for completeness)
@@ -387,3 +388,20 @@ def test_layered_ignore_provided_once_per_flow() -> None:
                 pytest.fail(f"Found LayeredIgnore(project_root).is_ignored in process_*_file at line {i}")
 
     # All structure checks passed
+
+
+def test_flow_module_has_no_sql_yaml_extraction() -> None:
+    """The flow module defines no SQL/YAML extraction surface (sources only)."""
+    import importlib
+
+    flow = importlib.import_module(
+        "java_codebase_rag.index.java_index_flow_lancedb"
+    )
+    for name in ("process_sql_file", "process_yaml_file", "SqlLanceChunk", "YamlLanceChunk"):
+        assert not hasattr(flow, name), f"{name} is still defined in the flow module"
+
+    common = importlib.import_module(
+        "java_codebase_rag.index.java_index_v1_common"
+    )
+    assert not hasattr(common, "SQL_CHUNK"), "SQL_CHUNK is still defined"
+    assert not hasattr(common, "YAML_CHUNK"), "YAML_CHUNK is still defined"

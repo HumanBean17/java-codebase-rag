@@ -235,17 +235,14 @@ async def test_optimize_reports_missing_table_as_skipped(monkeypatch, tmp_path) 
     """A table name absent from the DB is reported skipped, with no exception."""
     from java_codebase_rag import lance_optimize
 
-    # DB contains only the java table; sql + yaml are absent (e.g. a repo with
-    # no SQL/YAML) and must come back as skipped.
+    # DB contains no tables at all (e.g. a vectors run that produced nothing
+    # yet) — every registered name must come back as skipped.
     java_name = lance_optimize.LANCE_TABLE_NAMES[0]
-    java_table = _FakeTable(java_name, [None])
-    conn = _FakeConnection(table_names={java_name}, tables={java_name: java_table})
+    conn = _FakeConnection(table_names=set(), tables={})
     _install_fake_lancedb(monkeypatch, conn)
 
     results = await lance_optimize.optimize_lance_tables(tmp_path, quiet=True)
-    assert results[java_name] == "ok"
-    for missing in lance_optimize.LANCE_TABLE_NAMES[1:]:
-        assert results[missing] == "skipped"
+    assert results[java_name] == "skipped"
 
 
 async def test_optimize_closes_connection_even_on_open_failure(monkeypatch, tmp_path) -> None:
@@ -278,4 +275,4 @@ def test_lance_table_names_constant_matches_search_lancedb_tables() -> None:
     finally:
         sys.path.pop(0)
     assert set(LANCE_TABLE_NAMES) == set(TABLES.values())
-    assert len(LANCE_TABLE_NAMES) == 3
+    assert len(LANCE_TABLE_NAMES) == 1

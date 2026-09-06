@@ -29,12 +29,10 @@ from typing import Callable, Literal
 # ``_make_optimize_event``.
 _OptimizeStatus = Literal["running", "done", "failed"]
 
-# Single source of truth for the three Lance table names created by the flow.
+# Single source of truth for the Lance table name created by the flow.
 # Keep in sync with ``search_lancedb.TABLES`` (the values there mirror these).
 LANCE_TABLE_NAMES: tuple[str, ...] = (
     "javacodeindex_java_code",
-    "sqlschemaindex_sql_schema",
-    "yamlconfigindex_yaml_config",
 )
 
 

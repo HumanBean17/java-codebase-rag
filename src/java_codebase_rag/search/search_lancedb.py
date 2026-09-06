@@ -60,8 +60,6 @@ from java_codebase_rag.search.search_scoring import (  # noqa: F401
 
 TABLES: dict[str, str] = {
     "java": "javacodeindex_java_code",
-    "sql": "sqlschemaindex_sql_schema",
-    "yaml": "yamlconfigindex_yaml_config",
 }
 
 # Optional enrichment columns on the java chunk table (absent on older indexes).
